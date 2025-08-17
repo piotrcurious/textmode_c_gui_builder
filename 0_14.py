@@ -296,39 +296,64 @@ class Designer:
         if self.selected_object_index != -1 and self.objects:
             return self.objects[self.selected_object_index]
         return None
-        
-    def _handle_input(self, key):
-        # Handle mode-specific actions first
-        if self.mode in [DesignMode.DRAW_BOX_END, DesignMode.DRAW_LINE_END]:
-            if key in [10, 13, curses.KEY_ENTER]:
-                self._finish_drawing()
-            elif key == 27: # Escape
-                self._cancel_drawing()
-            else:
-                self._handle_navigation(key)
-        elif self.mode == DesignMode.NAVIGATE:
-            if key in [10, 13, curses.KEY_ENTER]:
-                self._handle_enter_key()
-            elif key == ord('q'): return False
-            elif key == ord('n'): self._new_screen()
-            elif key == ord('m'): self._switch_screen()
-            elif key == ord('s'): self._save_and_compile()
-            elif key == ord('\t'): self._select_next_object()
-            elif key == 27: # Escape
-                self.selected_object_index = -1
-            elif key in [curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]:
-                self._handle_navigation(key)
-            elif key in [curses.KEY_DC, ord('d')]: self._delete_selected_object()
-            elif key == ord('c'): self._change_selected_color()
-            elif key == ord('+'): self._change_layer(1)
-            elif key == ord('-'): self._change_layer(-1)
-            elif key == ord('b'): self._start_drawing("box")
-            elif key == ord('l'): self._start_drawing("line")
-            elif key == ord('t'): self._get_text_from_user()
-            elif key == ord('f'): self._get_freehand_from_user()
-        
-        self._update_status()
-        return True
+
+
+  def _handle_input(self, key):
+    # Handle drawing END modes (finish or cancel)
+    if self.mode in [DesignMode.DRAW_BOX_END, DesignMode.DRAW_LINE_END]:
+        if key in [10, 13, curses.KEY_ENTER]:
+            self._finish_drawing()
+        elif key == 27:  # Escape
+            self._cancel_drawing()
+        else:
+            self._handle_navigation(key)
+
+    # Handle drawing START modes (set start point or cancel)
+    elif self.mode in [DesignMode.DRAW_BOX_START, DesignMode.DRAW_LINE_START]:
+        if key in [10, 13, curses.KEY_ENTER]:
+            self._handle_enter_key()
+        elif key == 27:  # Escape
+            self._cancel_drawing()
+        else:
+            self._handle_navigation(key)
+
+    # Normal navigation mode
+    elif self.mode == DesignMode.NAVIGATE:
+        if key in [10, 13, curses.KEY_ENTER]:
+            self._handle_enter_key()
+        elif key == ord('q'):
+            return False
+        elif key == ord('n'):
+            self._new_screen()
+        elif key == ord('m'):
+            self._switch_screen()
+        elif key == ord('s'):
+            self._save_and_compile()
+        elif key == ord('\t'):
+            self._select_next_object()
+        elif key == 27:  # Escape
+            self.selected_object_index = -1
+        elif key in [curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]:
+            self._handle_navigation(key)
+        elif key in [curses.KEY_DC, ord('d')]:
+            self._delete_selected_object()
+        elif key == ord('c'):
+            self._change_selected_color()
+        elif key == ord('+'):
+            self._change_layer(1)
+        elif key == ord('-'):
+            self._change_layer(-1)
+        elif key == ord('b'):
+            self._start_drawing("box")
+        elif key == ord('l'):
+            self._start_drawing("line")
+        elif key == ord('t'):
+            self._get_text_from_user()
+        elif key == ord('f'):
+            self._get_freehand_from_user()
+
+    self._update_status()
+    return True
 
     def _handle_navigation(self, key):
         selected_obj = self._get_selected_object()
@@ -354,19 +379,29 @@ class Designer:
             self.mode = DesignMode.DRAW_LINE_END
             self.temp_data['x1'], self.temp_data['y1'] = self.cursor_x, self.cursor_y
             self.status = "Move to end point and press Enter."
-            
+
+
     def _update_status(self):
-        actions = ""
-        if self.mode == DesignMode.NAVIGATE:
-            if self._get_selected_object():
-                actions = "MOVE with arrows | (d)elete (c)olor (+/-)layer | (ESC) deselect | (TAB) next object"
-            else:
-                actions = "Draw: (b)ox (l)ine (t)ext (f)reehand | (n)ew screen (m)anage screens (s)ave | (TAB) select object"
-        elif self.mode in [DesignMode.DRAW_BOX_START, DesignMode.DRAW_LINE_START]:
-            actions = "Press ENTER to set start point, ESC to cancel."
-        elif self.mode in [DesignMode.DRAW_BOX_END, DesignMode.DRAW_LINE_END]:
-            actions = "Move cursor to end point, press ENTER to finish, ESC to cancel."
-        self.status = actions
+    actions = ""
+    if self.mode == DesignMode.NAVIGATE:
+        if self._get_selected_object():
+            actions = (
+                "MOVE with arrows | (d)elete (c)olor (+/-)layer | "
+                "(ESC) deselect | (TAB) next object"
+            )
+        else:
+            actions = (
+                "Draw: (b)ox (l)ine (t)ext (f)reehand | "
+                "(n)ew screen (m)anage screens (s)ave | (TAB) select object"
+            )
+
+    elif self.mode in [DesignMode.DRAW_BOX_START, DesignMode.DRAW_LINE_START]:
+        actions = "Drawing START: Move cursor, press ENTER to set start point, or ESC to cancel."
+
+    elif self.mode in [DesignMode.DRAW_BOX_END, DesignMode.DRAW_LINE_END]:
+        actions = "Drawing END: Move cursor, press ENTER to finish, or ESC to cancel."
+
+    self.status = actions
 
     def _prompt(self, prompt_text):
         self.mode = DesignMode.PROMPT
@@ -492,32 +527,74 @@ class Designer:
             if name: self.objects.append(DrawableObject("freehand", name, (self.cursor_x, self.cursor_y, lines)))
         self.mode = DesignMode.NAVIGATE
 
-    def _draw_ui(self):
-        self.stdscr.clear()
-        
-        for i, obj in enumerate(self.objects):
-            obj.draw_on_canvas(self.stdscr, i == self.selected_object_index)
+def _draw_ui(self):
+    self.stdscr.clear()
 
-        # Draw previews
-        if self.mode == DesignMode.DRAW_BOX_END:
-            x1, y1 = self.temp_data['x1'], self.temp_data['y1']
-            textpad.rectangle(self.stdscr, min(y1, self.cursor_y), min(x1, self.cursor_x), max(y1, self.cursor_y), max(x1, self.cursor_x))
-        elif self.mode == DesignMode.DRAW_LINE_END:
-            temp_line = DrawableObject('line', 'temp', (self.temp_data['x1'], self.temp_data['y1'], self.cursor_x, self.cursor_y))
-            temp_line.draw_on_canvas(self.stdscr, True)
+    # Draw all committed objects
+    for i, obj in enumerate(self.objects):
+        obj.draw_on_canvas(self.stdscr, i == self.selected_object_index)
 
-        # Status Bar and Cursor
-        h, w = self.stdscr.getmaxyx()
-        pos_str = f"Pos:({self.cursor_x},{self.cursor_y}) | Screen: {self.current_screen_name or 'None'} | {self.status}"
-        self.stdscr.addstr(h - 1, 0, pos_str.ljust(w-1), curses.A_REVERSE)
-        
-        if self.mode not in [DesignMode.PROMPT, DesignMode.SWITCH_SCREEN]:
-            curses.curs_set(1)
-            self.stdscr.move(self.cursor_y, self.cursor_x)
-        else:
-            curses.curs_set(0) # Hide cursor in prompt/menu mode
+    # Previews for drawing modes
+    if self.mode == DesignMode.DRAW_BOX_START:
+        # Show start marker at cursor
+        self.stdscr.addch(
+            self.cursor_y, self.cursor_x, 'X',
+            curses.A_BOLD | curses.color_pair(2)
+        )
 
-        self.stdscr.refresh()
+    elif self.mode == DesignMode.DRAW_LINE_START:
+        # Show start marker at cursor
+        self.stdscr.addch(
+            self.cursor_y, self.cursor_x, 'X',
+            curses.A_BOLD | curses.color_pair(2)
+        )
+
+    elif self.mode == DesignMode.DRAW_BOX_END:
+        # Draw rectangle preview
+        x1, y1 = self.temp_data['x1'], self.temp_data['y1']
+        textpad.rectangle(
+            self.stdscr,
+            min(y1, self.cursor_y),
+            min(x1, self.cursor_x),
+            max(y1, self.cursor_y),
+            max(x1, self.cursor_x)
+        )
+        # Keep start marker visible
+        self.stdscr.addch(
+            y1, x1, 'X',
+            curses.A_BOLD | curses.color_pair(2)
+        )
+
+    elif self.mode == DesignMode.DRAW_LINE_END:
+        # Draw line preview
+        temp_line = DrawableObject(
+            'line',
+            'temp',
+            (self.temp_data['x1'], self.temp_data['y1'],
+             self.cursor_x, self.cursor_y)
+        )
+        temp_line.draw_on_canvas(self.stdscr, True)
+        # Keep start marker visible
+        self.stdscr.addch(
+            self.temp_data['y1'], self.temp_data['x1'], 'X',
+            curses.A_BOLD | curses.color_pair(2)
+        )
+
+    # Status bar and cursor
+    h, w = self.stdscr.getmaxyx()
+    pos_str = (
+        f"Pos:({self.cursor_x},{self.cursor_y}) | "
+        f"Screen: {self.current_screen_name or 'None'} | {self.status}"
+    )
+    self.stdscr.addstr(h - 1, 0, pos_str.ljust(w - 1), curses.A_REVERSE)
+
+    if self.mode not in [DesignMode.PROMPT, DesignMode.SWITCH_SCREEN]:
+        curses.curs_set(1)
+        self.stdscr.move(self.cursor_y, self.cursor_x)
+    else:
+        curses.curs_set(0)  # Hide cursor in prompt/menu mode
+
+    self.stdscr.refresh()
 
     def _save_and_compile(self):
         if self.current_screen_name: self.screens[self.current_screen_name] = self.objects
