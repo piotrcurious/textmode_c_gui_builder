@@ -169,24 +169,45 @@ class DrawableObject:
         self.color_map = {1: 37, 2: 31, 3: 32, 4: 33, 5: 34, 6: 35, 7: 36} # Maps curses pair to FG color
 
     def to_cpp_declaration(self):
-        color = self.color_map.get(self.color_pair, 37) # Default to white
-        if self.obj_type == "box":
-            x, y, w, h = self.data
-            return f"  Box {self.name} = {{{x}, {y}, {w}, {h}, {color}}};"
-        elif self.obj_type == "text":
-            x, y, txt = self.data
-            escaped_txt = txt.replace('"', '\\"')
-            return f'  Text {self.name} = {{{x}, {y}, "{escaped_txt}", {color}}};'
-        elif self.obj_type == "line":
-            x1, y1, x2, y2 = self.data
-            return f"  Line {self.name} = {{{x1}, {y1}, {x2}, {y2}, {color}}};"
-        elif self.obj_type == "freehand":
-            x, y, lines = self.data
-            lines_array_name = f"{self.name}_lines"
-            lines_decl = f'const char* {lines_array_name}[] = {{{", ".join(f\'"{line.replace("\"", "\\\"")}"\' for line in lines)}}};'
-            struct_decl = f"Freehand {self.name} = {{{x}, {y}, {lines_array_name}, {len(lines)}, {color}}};"
-            return f"  {lines_decl}\n  {struct_decl}"
-        return ""
+    def cpp_escape(s: str) -> str:
+        """Escape a Python string into a safe C++ string literal."""
+        return (
+            s.replace("\\", "\\\\")   # escape backslashes first
+             .replace("\"", "\\\"")   # escape double quotes
+             .replace("\n", "\\n")    # escape newlines
+             .replace("\r", "\\r")    # escape carriage returns
+        )
+
+    color = self.color_map.get(self.color_pair, 37)  # Default to white
+
+    if self.obj_type == "box":
+        x, y, w, h = self.data
+        return f"  Box {self.name} = {{{x}, {y}, {w}, {h}, {color}}};"
+
+    elif self.obj_type == "text":
+        x, y, txt = self.data
+        escaped_txt = cpp_escape(txt)
+        return f'  Text {self.name} = {{{x}, {y}, "{escaped_txt}", {color}}};'
+
+    elif self.obj_type == "line":
+        x1, y1, x2, y2 = self.data
+        return f"  Line {self.name} = {{{x1}, {y1}, {x2}, {y2}, {color}}};"
+
+    elif self.obj_type == "freehand":
+        x, y, lines = self.data
+        lines_array_name = f"{self.name}_lines"
+
+        # Escape each string safely for C++
+        escaped_lines = [f"\"{cpp_escape(line)}\"" for line in lines]
+
+        # Build array declaration
+        lines_decl = f"const char* {lines_array_name}[] = {{{', '.join(escaped_lines)}}};"
+
+        struct_decl = f"Freehand {self.name} = {{{x}, {y}, {lines_array_name}, {len(lines)}, {color}}};"
+        return f"  {lines_decl}\n  {struct_decl}"
+
+    return ""
+
 
     def to_cpp_draw_call(self):
         return f"  draw({self.name});"
