@@ -1,0 +1,31 @@
+{
+  "box1": {
+    "name": "box1",
+    "color": "WHITE",
+    "type": "BOX",
+    "layer": 1,
+    "x": 3,
+    "y": 6,
+    "w": 21,
+    "h": 9
+  },
+  "ohah": {
+    "name": "ohah",
+    "color": "GREEN",
+    "type": "TEXT",
+    "layer": 1,
+    "x": 6,
+    "y": 6,
+    "content": "<-OH->\n<-AH->"
+  },
+  "box": {
+    "name": "box",
+    "color": "WHITE",
+    "type": "BOX",
+    "layer": 0,
+    "x": 4,
+    "y": 3,
+    "w": 10,
+    "h": 8
+  }
+}
