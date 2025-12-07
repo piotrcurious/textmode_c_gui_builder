@@ -1,0 +1,29 @@
+{
+  "box": {
+    "name": "box",
+    "color": "RED",
+    "type": "BOX",
+    "x": 6,
+    "y": 10,
+    "w": 7,
+    "h": 1
+  },
+  "box1": {
+    "name": "box1",
+    "color": "WHITE",
+    "type": "BOX",
+    "x": 4,
+    "y": 7,
+    "w": 7,
+    "h": 1
+  },
+  "box2": {
+    "name": "box2",
+    "color": "WHITE",
+    "type": "BOX",
+    "x": 5,
+    "y": 2,
+    "w": 8,
+    "h": 7
+  }
+}
