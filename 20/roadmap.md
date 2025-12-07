@@ -2,7 +2,7 @@
 
 ## Philosophical Goal
 
-Transform the tool from a static drawing utility into a dynamic layout and data-binding framework for microcontroller GUIs. The layout designed in the editor should function as a semantic guide for the C++ application, allowing it to dynamically render data and manage state based on the structure of the UI, rather than just drawing static shapes.
+Transform the tool from a static drawing utility into a dynamic layout and data-binding framework for microcontroller GUIs. The layout designed in the editor should function as a semantic guide for the C++ application, allowing it to dynamically render data and manage state based on the structure of the UI, rather than just drawing static shapes. **The generator's role is to provide the layout data, not to generate application logic.**
 
 ---
 
@@ -26,20 +26,43 @@ The next major leap for the editor is to allow the creation of reusable, hierarc
 
 ---
 
-## Pillar 2: Dynamic C++ Framework
+## Pillar 2: Dynamic C++ Framework (Corrected Philosophy)
 
-The generated C++ code needs to evolve from a simple drawing script into a more dynamic framework that supports data binding and state management.
+The C++ framework will be enhanced to empower the developer, not to automate their logic. The layout provides the "what" and "where"; the developer's `.ino` code provides the "how".
 
-### 2.1. Data-Binding Syntax
--   **Editor**: In the `tkinter` Properties Editor for `Text` objects, allow the use of a simple data-binding syntax in the `content` field. For example, `Temp: {{temp_c}} C`.
--   **Code Generation**: The generator should parse this syntax. Instead of generating a static `const char*`, it should generate a `printf`-style function call, e.g., `ui.drawText(x, y, "Temp: %d C", temp_c, color);`.
+### 2.1. `printf`-style Helper Functions in `SerialUI.h`
+-   **Goal**: Empower the developer to easily bind their data to the UI.
+-   **Action**: Add new, overloaded helper functions to the `SerialUI` class in `SerialUI.h`.
+    -   `void printfText(const UI_Text& text, ...)`: This function will take a `UI_Text` struct (e.g., `Layout_Main::statusText`) and a variable number of arguments. It will use the `content` field of the struct as a `printf`-compatible format string.
+    -   `void printfText(int16_t x, int16_t y, UI_Color color, const char* fmt, ...)`: A lower-level version for more direct control.
 
-### 2.2. Dynamic `printf` in `SerialUI.h`
--   **`SerialUI` Class**: Create a new, overloaded `drawText` method in the `SerialUI` C++ class that accepts a format string and a variable number of arguments (variadic template or `...`). This function will be responsible for `snprintf`ing the data into a buffer before printing.
+### 2.2. The Layout as a Data Contract
+-   **Concept**: The `content` field of a `Text` object should be treated as a format string by the developer. The designer and developer agree on a contract: a `Text` object named `temperature_float_C` will contain a `printf`-compatible string like `Temp: %.2f C`.
+-   **No Generator Logic**: The Python generator will **not** parse or modify this content. It will be saved as a standard `const char*` in the C++ struct.
 
-### 2.3. Layout as Data Guide
--   **Concept**: As described in the philosophical goal, the `Layout_` structs should be used as more than just drawing guides. The user's C++ code should be able to reference them to make decisions.
--   **Example (`example.ino`):** The `example.ino` should be updated to demonstrate this concept. For example, a "details" screen might have a larger box for temperature than the "main" screen. The C++ code would check the size of `Layout_Details::tempBox.w` to decide whether to show a detailed or a summary view.
+### 2.3. Updated `example.ino`
+-   **Action**: The `example.ino` must be updated to provide a clear, canonical example of this philosophy.
+-   **Example Code**:
+    ```cpp
+    #include "ui_layout.h"
+
+    SerialUI ui;
+    float tempC = 25.4;
+
+    void setup() {
+        ui.begin();
+        drawScreen_Main(ui); // Draw static parts
+    }
+
+    void loop() {
+        // Use the new helper to dynamically print the temperature
+        // The position, color, and format string are all defined in the layout
+        ui.printfText(Layout_Main::temperature_float_C, tempC);
+
+        delay(1000);
+        tempC += 0.1;
+    }
+    ```
 
 ---
 
@@ -48,7 +71,7 @@ The generated C++ code needs to evolve from a simple drawing script into a more 
 The editor should be made more powerful and visually expressive.
 
 ### 3.1. ANSI Colors in Freehand
--   **Editor**: The `tkinter` editor for `Freehand` objects should be enhanced to support the insertion of ANSI color codes. This could be done with a simple right-click menu or a color picker.
+-   **Editor**: The `tkinter` editor for `Freehand` objects should be enhanced to support the insertion of ANSI color codes.
 -   **Parser/Renderer**: The `curses` renderer needs to be able to parse and display these ANSI codes in the preview.
 -   **C++ Generation**: The C++ code generation for `PROGMEM` strings needs to correctly embed these ANSI escape codes.
 
@@ -58,14 +81,14 @@ The editor should be made more powerful and visually expressive.
 -   **Curses UI**: The `c` (color) key should cycle through the new, extended palette.
 
 ### 3.3. Resizing Objects
--   **Editor**: Implement a "resize" mode in the `curses` editor (e.g., activated by pressing `r` on a selected object). In this mode, the arrow keys would resize the object instead of moving it. This would apply to `Box`es and `Line`s.
+-   **Editor**: Implement a "resize" mode in the `curses` editor (e.g., activated by pressing `r` on a selected object). In this mode, the arrow keys would resize the object. This would apply to `Box`es and `Line`s.
 
 ---
 
 ## Pillar 4: Quality of Life Improvements
 
 ### 4.1. Formal Project File
--   **`.uiproj` File**: Instead of relying on a loose `project.json`, create a formal project file (e.g., `my_ui.uiproj`) that contains the project data. The tool would be launched with this file as an argument (`python 19.py my_ui.uiproj`). This makes project management more explicit.
+-   **`.uiproj` File**: Instead of relying on a loose `project.json`, create a formal project file (e.g., `my_ui.uiproj`) that contains the project data. The tool would be launched with this file as an argument (`python 19.py my_ui.uiproj`).
 
 ### 4.2. Command-Line Arguments
 -   Implement basic command-line arguments for specifying the project file, and perhaps for running in a non-interactive "compile-only" mode.
