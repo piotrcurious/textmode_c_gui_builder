@@ -5,11 +5,7 @@
 #include <avr/pgmspace.h>
 
 // --- TYPES ---
-enum class UI_Color {
-    WHITE=37, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36,
-    BOLD_WHITE=90, BOLD_RED=91, BOLD_GREEN=92, BOLD_YELLOW=93,
-    BG_RED=41, BG_GREEN=42, BG_YELLOW=43, BG_BLUE=44
-};
+enum class UI_Color { WHITE=37, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36 };
 
 // POD (Plain Old Data) Structures for Layout Anchors
 struct UI_Box { int16_t x, y, w, h; UI_Color color; };
@@ -30,16 +26,7 @@ public:
     void resetAttr() { Serial.print("\x1b[0m"); }
 
     void setColor(UI_Color color) {
-        int color_code = (int)color;
-        if (color_code >= 90 && color_code <= 93) { // Bold colors
-            Serial.print("\x1b[1;");
-            Serial.print(color_code - 60); // Convert to regular color code
-            Serial.print("m");
-        } else {
-            Serial.print("\x1b[0;");
-            Serial.print(color_code);
-            Serial.print("m");
-        }
+        Serial.print("\x1b[0;"); Serial.print((int)color); Serial.print("m");
     }
     void moveCursor(int x, int y) {
         Serial.print("\x1b["); Serial.print(y + 1); Serial.print(";"); Serial.print(x + 1); Serial.print("H");

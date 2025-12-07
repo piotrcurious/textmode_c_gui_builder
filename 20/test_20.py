@@ -7,7 +7,7 @@ import sys
 # Add the parent directory to the sys.path to allow imports from 20.py
 sys.path.append(str(Path(__file__).parent))
 
-from twenty import UIElement, Box, Line, MetaObject, ProjectManager, Screen, Color, Text
+from twenty import UIElement, Box, Line, Text, MetaObject, ProjectManager, Screen, Color
 
 class TestProjectGeneration(unittest.TestCase):
     def setUp(self):

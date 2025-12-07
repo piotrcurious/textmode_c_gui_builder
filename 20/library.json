@@ -2,25 +2,26 @@
   "box": {
     "name": "box",
     "color": "RED",
-    "type": "BOX",
+    "type": 12,
     "x": 6,
     "y": 10,
     "w": 7,
-    "h": 1
+    "h": 0
   },
   "box1": {
     "name": "box1",
     "color": "WHITE",
-    "type": "BOX",
+    "type": 0,
     "x": 4,
     "y": 7,
     "w": 7,
-    "h": 1
+    "h": 0
   },
   "box2": {
     "name": "box2",
     "color": "WHITE",
     "type": "BOX",
+    "layer": 0,
     "x": 5,
     "y": 2,
     "w": 8,
