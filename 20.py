@@ -601,6 +601,53 @@ class GuiManager:
                 txt.insert("1.0", "\n".join(obj.lines))
                 row += 1
 
+                # --- ANSI Color Palette ---
+                color_palette_frame = tk.Frame(frm)
+                color_palette_frame.grid(row=row, column=1, sticky="w", pady=4)
+
+                color_buttons_frame = tk.Frame(color_palette_frame)
+                color_buttons_frame.pack(fill="x")
+
+                color_map = {
+                    'WHITE': '#EEEEEE', 'RED': '#FF6B6B', 'GREEN': '#6BFF6B',
+                    'YELLOW': '#FFFF6B', 'BLUE': '#6B6BFF', 'MAGENTA': '#FF6BFF', 'CYAN': '#6BFFFF'
+                }
+
+                def insert_ansi_code(code: str):
+                    try:
+                        txt.insert(tk.INSERT, code)
+                        txt.focus_set()
+                    except Exception:
+                        pass
+
+                col = 0
+                for color in Color:
+                    is_bold = "BOLD" in color.name
+                    base_name = color.name.replace("BOLD_", "")
+
+                    val = color.value
+                    if is_bold:
+                        code = f"\x1b[1;{val-60}m"
+                    else:
+                        code = f"\x1b[0;{val}m"
+
+                    btn = tk.Button(
+                        color_buttons_frame,
+                        text=base_name[0],
+                        bg=color_map.get(base_name, "#FFFFFF"),
+                        fg="#000000",
+                        font=("Consolas", 8, "bold" if is_bold else "normal"),
+                        width=2, relief="solid", borderwidth=1,
+                        command=lambda c=code: insert_ansi_code(c)
+                    )
+                    btn.grid(row=1 if is_bold else 0, column=col % (len(Color)//2), padx=1, pady=1)
+                    col += 1
+
+                reset_code = "\x1b[0m"
+                btn_rst = tk.Button(color_buttons_frame, text="RST", width=4, relief="solid", borderwidth=1, command=lambda: insert_ansi_code(reset_code))
+                btn_rst.grid(row=0, column=(len(Color)//2), rowspan=2, padx=1, pady=1, sticky="ns")
+                row += 1
+
             frm.grid_columnconfigure(1, weight=1)
 
             def on_ok():
@@ -1009,6 +1056,62 @@ class Designer:
                 try: self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
                 except Exception: pass
 
+    def _draw_ansi_string(self, y, x, text, base_attr=curses.A_NORMAL):
+        """Draws a string at (y,x) that may contain ANSI color codes."""
+        try:
+            self.stdscr.move(y, x)
+            color_list = list(Color)
+            current_attr = base_attr
+
+            # Split text by ANSI escape codes, keeping the codes. Text parts are even, codes are odd.
+            parts = re.split(r'(\x1b\[[0-9;]*m)', text)
+
+            for i, part in enumerate(parts):
+                if not part:
+                    continue
+
+                if i % 2 == 0:  # This is a text part
+                    try:
+                        self.stdscr.addstr(part, current_attr)
+                    except curses.error:
+                        pass  # Ignore errors from writing past screen edge
+                else:  # This is an ANSI code part
+                    try:
+                        params = [int(p) for p in part[2:-1].split(';') if p]
+                        if not params or params == [0]:  # Reset
+                            current_attr = base_attr
+                            continue
+
+                        # Simplified parser for Foregrounds + Bold
+                        is_bold = 1 in params
+                        color_code = -1
+                        for p in params:
+                            if 30 <= p <= 37:
+                                color_code = p
+
+                        if color_code != -1:
+                            target_val = color_code + 60 if is_bold else color_code
+
+                            # Find the matching Color enum to get the pair index
+                            found_color = None
+                            for c in color_list:
+                                if c.value == target_val:
+                                    found_color = c
+                                    break
+
+                            if found_color:
+                                pair_index = color_list.index(found_color) + 1
+                                attr = curses.color_pair(pair_index)
+                                # The pair already has the color, we just need to add bold if needed
+                                if "BOLD" in found_color.name:
+                                    attr |= curses.A_BOLD
+                                current_attr = attr
+
+                    except (ValueError, IndexError):
+                        pass  # Ignore malformed codes
+        except curses.error:
+            pass # Ignore initial move error
+
     def _draw(self):
         self.stdscr.clear()
         for i, o in enumerate(self.cur_objs):
@@ -1048,7 +1151,7 @@ class Designer:
                         if e2 <= dx: err += dx; cy += sy
                 elif isinstance(o, Freehand):
                     for r, ln in enumerate(o.lines):
-                        self.stdscr.addstr(o.y + r, o.x, ln, attr)
+                        self._draw_ansi_string(o.y + r, o.x, ln, attr)
             except curses.error:
                 pass
 
