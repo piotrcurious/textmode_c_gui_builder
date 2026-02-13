@@ -1,0 +1,52 @@
+[
+  {
+    "name": "Main",
+    "objects": [
+      {
+        "name": "box_0",
+        "color": "WHITE",
+        "type": "BOX",
+        "layer": 0,
+        "x": 5,
+        "y": 2,
+        "w": 8,
+        "h": 7
+      },
+      {
+        "name": "box_1",
+        "color": "RED",
+        "type": "BOX",
+        "layer": 1,
+        "x": 8,
+        "y": 4,
+        "w": 9,
+        "h": 6
+      }
+    ]
+  },
+  {
+    "name": "settings",
+    "objects": [
+      {
+        "name": "box2_1",
+        "color": "GREEN",
+        "type": "BOX",
+        "layer": 0,
+        "x": 4,
+        "y": 1,
+        "w": 8,
+        "h": 7
+      },
+      {
+        "name": "box2",
+        "color": "WHITE",
+        "type": "BOX",
+        "layer": 0,
+        "x": 7,
+        "y": 3,
+        "w": 8,
+        "h": 7
+      }
+    ]
+  }
+]
