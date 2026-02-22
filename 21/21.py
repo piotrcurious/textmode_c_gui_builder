@@ -583,10 +583,12 @@ class GuiManager:
                 if cbl: txt.tag_add("ansi_blink", ids, ide)
 
     def _strip_codes(self, txt, start=None, end=None):
+        should_reselect = False
         if start is None or end is None:
             try:
                 if txt.tag_ranges(tk.SEL):
                     start, end = txt.index(tk.SEL_FIRST), txt.index(tk.SEL_LAST)
+                    should_reselect = True
                 else:
                     start, end = "1.0", tk.END
             except Exception:
@@ -596,19 +598,37 @@ class GuiManager:
         stripped = re.sub(r'\x1b\[[0-9;]*m', '', content)
         txt.delete(start, end)
         txt.insert(start, stripped)
+
+        new_end = txt.index(f"{start} + {len(stripped)} chars")
+        if should_reselect:
+            txt.tag_remove(tk.SEL, "1.0", tk.END)
+            txt.tag_add(tk.SEL, start, new_end)
+
         self._apply_ansi_highlight(txt)
+        return new_end
 
     def _smart_ins(self, txt, code):
         try:
             if txt.tag_ranges(tk.SEL):
                 start = txt.index(tk.SEL_FIRST)
-                # First strip internal codes from selection
-                self._strip_codes(txt, start, txt.index(tk.SEL_LAST))
-                # Selection might have changed index because codes were removed
-                # Re-get selection end
                 end = txt.index(tk.SEL_LAST)
-                txt.insert(end, "\x1b[0m")
-                txt.insert(start, code)
+
+                # Use marks with proper gravity to track boundaries
+                txt.mark_set("wrap_start", start)
+                txt.mark_gravity("wrap_start", tk.LEFT)
+                txt.mark_set("wrap_end", end)
+                txt.mark_gravity("wrap_end", tk.RIGHT)
+
+                # Strip internal codes first
+                self._strip_codes(txt, "wrap_start", "wrap_end")
+
+                # wrap_start (LEFT) is at beginning of text
+                # wrap_end (RIGHT) is at end of text
+                txt.insert("wrap_end", "\x1b[0m")
+                txt.insert("wrap_start", code)
+
+                # Re-select everything from new start to new end
+                txt.tag_add(tk.SEL, "wrap_start", "wrap_end")
             else:
                 cur = txt.index(tk.INSERT)
                 prev_text = txt.get(f"{cur}-10c", cur)
