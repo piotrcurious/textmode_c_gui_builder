@@ -1,0 +1,40 @@
+{
+  "box1": {
+    "name": "box1",
+    "color": "WHITE",
+    "type": "BOX",
+    "layer": 0,
+    "x": 3,
+    "y": 2,
+    "w": 18,
+    "h": 4
+  },
+  "red_box": {
+    "name": "red_box",
+    "color": "RED",
+    "type": "BOX",
+    "layer": 1,
+    "x": 6,
+    "y": 4,
+    "w": 27,
+    "h": 4
+  },
+  "ohah": {
+    "name": "ohah",
+    "color": "BLUE",
+    "type": "TEXT",
+    "layer": 1,
+    "x": 17,
+    "y": 5,
+    "content": "<--OH-->\n<--AH-->"
+  },
+  "temperature_float_C": {
+    "name": "temperature_float_C",
+    "color": "WHITE",
+    "type": "TEXT",
+    "layer": 2,
+    "x": 12,
+    "y": 6,
+    "content": "%f.3"
+  }
+}

@@ -1,0 +1,60 @@
+[
+  {
+    "name": "Main",
+    "objects": [
+      {
+        "name": "box_0",
+        "color": "WHITE",
+        "type": "BOX",
+        "layer": 0,
+        "x": 3,
+        "y": 2,
+        "w": 18,
+        "h": 4
+      },
+      {
+        "name": "box_1",
+        "color": "RED",
+        "type": "BOX",
+        "layer": 1,
+        "x": 6,
+        "y": 4,
+        "w": 27,
+        "h": 4
+      },
+      {
+        "name": "temperature_float_C",
+        "color": "WHITE",
+        "type": "TEXT",
+        "layer": 2,
+        "x": 17,
+        "y": 6,
+        "content": "%f.3"
+      }
+    ]
+  },
+  {
+    "name": "settings",
+    "objects": [
+      {
+        "name": "red_box",
+        "color": "RED",
+        "type": "BOX",
+        "layer": 1,
+        "x": 4,
+        "y": 2,
+        "w": 35,
+        "h": 8
+      },
+      {
+        "name": "txt_1",
+        "color": "BLUE",
+        "type": "TEXT",
+        "layer": 1,
+        "x": 17,
+        "y": 5,
+        "content": "<--OH-->\n<--AH-->"
+      }
+    ]
+  }
+]
