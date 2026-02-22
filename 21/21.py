@@ -1024,7 +1024,11 @@ class Designer:
 
     def _handle_key(self, k: int) -> bool:
         if k == 27:
-            self.mode = Mode.NAV; self.sel_idx = -1; self.msg = "Cancelled"; return True
+            if self.edit_stack:
+                self.edit_stack.pop(); self.sel_idx = -1; self.msg = "Returned"
+            else:
+                self.mode = Mode.NAV; self.sel_idx = -1; self.msg = "Cancelled"
+            return True
 
         dx = dy = 0
         if k == curses.KEY_UP: dy = -1
@@ -1136,10 +1140,6 @@ class Designer:
                 o = self.cur_objs[self.sel_idx]
                 if isinstance(o, MetaObject):
                     self.edit_stack.append(o); self.sel_idx = -1; self.msg = f"Editing {o.name}"
-            if k == 27 and self.edit_stack: # ESC to return from meta edit
-                self.edit_stack.pop(); self.sel_idx = -1; self.msg = "Returned"
-                return True
-
             # layer controls
             if k == ord('[') and self._valid_sel() and self.sel_idx > 0:
                 self.cur_objs[self.sel_idx - 1], self.cur_objs[self.sel_idx] = self.cur_objs[self.sel_idx], self.cur_objs[self.sel_idx - 1]
