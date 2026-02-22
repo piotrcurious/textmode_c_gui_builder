@@ -25,8 +25,10 @@ SERIAL_UI_HEADER = r"""
 #include <stdarg.h>
 
 enum class UI_Color {
-    WHITE=37, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36,
-    BOLD_WHITE=97, BOLD_RED=91, BOLD_GREEN=92, BOLD_YELLOW=93, BOLD_BLUE=94, BOLD_MAGENTA=95, BOLD_CYAN=96
+    BLACK=30, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36, WHITE=37,
+    B_BLACK=90, B_RED=91, B_GREEN=92, B_YELLOW=93, B_BLUE=94, B_MAGENTA=95, B_CYAN=96, B_WHITE=97,
+    BG_BLACK=40, BG_RED=41, BG_GREEN=42, BG_YELLOW=43, BG_BLUE=44, BG_MAGENTA=45, BG_CYAN=46, BG_WHITE=47,
+    BG_B_BLACK=100, BG_B_RED=101, BG_B_GREEN=102, BG_B_YELLOW=103, BG_B_BLUE=104, BG_B_MAGENTA=105, BG_B_CYAN=106, BG_B_WHITE=107
 };
 struct UI_Box { int16_t x, y, w, h; UI_Color color; };
 struct UI_Text { int16_t x, y; const char* content; UI_Color color; };
@@ -46,11 +48,11 @@ public:
 
     void setColor(UI_Color color) {
         int c = (int)color;
-        if (c >= 90) { // Bold
-            Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m");
-        } else {
-            Serial.print("\x1b[0;"); Serial.print(c); Serial.print("m");
-        }
+        if (c >= 90 && c <= 97) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
+        else if (c >= 30 && c <= 37) { Serial.print("\x1b[0;"); Serial.print(c); Serial.print("m"); }
+        else if (c >= 40 && c <= 47) { Serial.print("\x1b["); Serial.print(c); Serial.print("m"); }
+        else if (c >= 100 && c <= 107) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
+        else { Serial.print("\x1b[0m"); }
     }
 
     void moveCursor(int x, int y) {
@@ -121,8 +123,10 @@ public:
 # Data model
 # ------------------------------
 class Color(Enum):
-    WHITE = 37; RED = 31; GREEN = 32; YELLOW = 33; BLUE = 34; MAGENTA = 35; CYAN = 36
-    BOLD_WHITE = 97; BOLD_RED = 91; BOLD_GREEN = 92; BOLD_YELLOW = 93; BOLD_BLUE = 94; BOLD_MAGENTA = 95; BOLD_CYAN = 96
+    BLACK=30; RED=31; GREEN=32; YELLOW=33; BLUE=34; MAGENTA=35; CYAN=36; WHITE=37
+    B_BLACK=90; B_RED=91; B_GREEN=92; B_YELLOW=93; B_BLUE=94; B_MAGENTA=95; B_CYAN=96; B_WHITE=97
+    BG_BLACK=40; BG_RED=41; BG_GREEN=42; BG_YELLOW=43; BG_BLUE=44; BG_MAGENTA=45; BG_CYAN=46; BG_WHITE=47
+    BG_B_BLACK=100; BG_B_RED=101; BG_B_GREEN=102; BG_B_YELLOW=103; BG_B_BLUE=104; BG_B_MAGENTA=105; BG_B_CYAN=106; BG_B_WHITE=107
 
     @classmethod
     def from_str(cls, s: str) -> "Color":
@@ -141,11 +145,6 @@ class UIElement:
     color: Color = Color.WHITE
     type: str = "BASE"
     layer: int = 0
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        d['color'] = self.color.name
-        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> Optional["UIElement"]:
@@ -537,49 +536,55 @@ class GuiManager:
         content = txt.get("1.0", tk.END)
         for tag in txt.tag_names():
             if tag.startswith("ansi"): txt.tag_remove(tag, "1.0", tk.END)
-
-        colors = {"31":"#ff5555", "32":"#55ff55", "33":"#ffff55", "34":"#5555ff", "35":"#ff55ff", "36":"#55ffff", "37":"#ffffff"}
-        for c, color in colors.items():
-            txt.tag_configure(f"ansi_{c}", foreground=color)
-            txt.tag_configure(f"ansi_bold_{c}", foreground=color, font=("Courier", 10, "bold"))
-        txt.tag_configure("ansi_code", elide=True)
-
-        import re
-        ansi_pattern = re.compile(r'\x1b\[([0-9;]*)m')
-        matches = list(ansi_pattern.finditer(content))
-        cur_fg, cur_bold = "37", False
-
-        for i, m in enumerate(matches):
+        palette = {
+            "0":"#000000", "1":"#aa0000", "2":"#00aa00", "3":"#aa5500", "4":"#0000aa", "5":"#aa00aa", "6":"#00aaaa", "7":"#aaaaaa",
+            "8":"#555555", "9":"#ff5555", "10":"#55ff55", "11":"#ffff55", "12":"#5555ff", "13":"#ff55ff", "14":"#55ffff", "15":"#ffffff"
+        }
+        for i, h in palette.items():
+            txt.tag_configure(f"ansi_fg_{i}", foreground=h)
+            txt.tag_configure(f"ansi_bg_{i}", background=h)
+        txt.tag_configure("ansi_bold", font=("Courier", 10, "bold")); txt.tag_configure("ansi_code", elide=True)
+        ansi_p = re.compile(r'\x1b\[([0-9;]*)m')
+        ms = list(ansi_p.finditer(content)); cfg, cbg, cb = "15", None, False
+        for i, m in enumerate(ms):
             txt.tag_add("ansi_code", f"1.0 + {m.start()} chars", f"1.0 + {m.end()} chars")
             for c in m.group(1).split(';'):
-                if c == "0": cur_fg, cur_bold = "37", False
-                elif c == "1": cur_bold = True
-                elif "31" <= c <= "37": cur_fg = c
-
-            t_start, t_end = m.end(), (matches[i+1].start() if i+1 < len(matches) else len(content))
-            if t_start < t_end:
-                tag = f"ansi_{cur_fg}" if not cur_bold else f"ansi_bold_{cur_fg}"
-                txt.tag_add(tag, f"1.0 + {t_start} chars", f"1.0 + {t_end} chars")
+                if c == "0": cfg, cbg, cb = "15", None, False
+                elif c == "1": cb = True
+                elif "30"<=c<="37": cfg = str(int(c)-30)
+                elif "90"<=c<="97": cfg = str(int(c)-90+8)
+                elif "40"<=c<="47": cbg = str(int(c)-40)
+                elif "100"<=c<="107": cbg = str(int(c)-100+8)
+            ts, te = m.end(), (ms[i+1].start() if i+1 < len(ms) else len(content))
+            if ts < te:
+                ids, ide = f"1.0 + {ts} chars", f"1.0 + {te} chars"
+                txt.tag_add(f"ansi_fg_{cfg}", ids, ide)
+                if cbg: txt.tag_add(f"ansi_bg_{cbg}", ids, ide)
+                if cb: txt.tag_add("ansi_bold", ids, ide)
 
     def _create_ansi_toolbar(self, parent, text_widget):
-        toolbar = tk.Frame(parent)
-        colors = [
-            ("W", "\x1b[37m"), ("R", "\x1b[31m"), ("G", "\x1b[32m"),
-            ("Y", "\x1b[33m"), ("B", "\x1b[34m"), ("M", "\x1b[35m"),
-            ("C", "\x1b[36m"), ("0", "\x1b[0m")
-        ]
-        bold_colors = [
-            ("BW", "\x1b[1;37m"), ("BR", "\x1b[1;31m"), ("BG", "\x1b[1;32m"),
-            ("BY", "\x1b[1;33m"), ("BB", "\x1b[1;34m"), ("BM", "\x1b[1;35m"),
-            ("BC", "\x1b[1;36m")
-        ]
-        def ins(c):
-            text_widget.insert(tk.INSERT, c)
-            self._apply_ansi_highlight(text_widget)
-        for n, c in colors: tk.Button(toolbar, text=n, command=lambda x=c: ins(x), width=2, font=("Arial", 7)).pack(side="left")
-        for n, c in bold_colors: tk.Button(toolbar, text=n, command=lambda x=c: ins(x), width=2, font=("Arial", 7)).pack(side="left")
-        tk.Button(toolbar, text="Clear Highlight", command=lambda: self._apply_ansi_highlight(text_widget), font=("Arial", 7)).pack(side="right")
-        return toolbar
+        frame = tk.Frame(parent); palette = {
+            "BLACK":"#000000", "RED":"#aa0000", "GREEN":"#00aa00", "YELLOW":"#aa5500", "BLUE":"#0000aa", "MAGENTA":"#aa00aa", "CYAN":"#00aaaa", "WHITE":"#aaaaaa",
+            "B_BLACK":"#555555", "B_RED":"#ff5555", "B_GREEN":"#55ff55", "B_YELLOW":"#ffff55", "B_BLUE":"#5555ff", "B_MAGENTA":"#ff55ff", "B_CYAN":"#55ffff", "B_WHITE":"#ffffff"
+        }
+        r1 = tk.Frame(frame); r1.pack(fill="x")
+        r2 = tk.Frame(frame); r2.pack(fill="x")
+        def ins(c): text_widget.insert(tk.INSERT, c); self._apply_ansi_highlight(text_widget)
+        # Foreground row
+        tk.Label(r1, text="FG:", font=("Arial", 7)).pack(side="left")
+        for i, (name, hex) in enumerate(palette.items()):
+            code = f"\x1b[{Color[name].value}m" if "B_" not in name else f"\x1b[1;{Color[name].value-60}m"
+            fg = "#ffffff" if i < 8 and name != "WHITE" else "#000000"
+            tk.Button(r1, bg=hex, fg=fg, text=name[0] if "B_" not in name else "B"+name[2], width=2, font=("Arial", 7), command=lambda c=code: ins(c)).pack(side="left")
+        # Background row
+        tk.Label(r2, text="BG:", font=("Arial", 7)).pack(side="left")
+        for i, (name, hex) in enumerate(palette.items()):
+            bg_name = "BG_" + name
+            code = f"\x1b[{Color[bg_name].value}m"
+            tk.Button(r2, bg=hex, width=2, font=("Arial", 7), command=lambda c=code: ins(c)).pack(side="left")
+        tk.Button(r2, text="RESET", font=("Arial", 7, "bold"), command=lambda: ins("\x1b[0m")).pack(side="left", padx=4)
+        tk.Button(r2, text="Highlight", font=("Arial", 7), command=lambda: self._apply_ansi_highlight(text_widget)).pack(side="right")
+        return frame
 
     # Blocking editors (Designer calls)
     def edit_text_blocking(self, initial: str = "", title: str = "Edit Text") -> Optional[str]:
@@ -589,20 +594,33 @@ class GuiManager:
         ev = threading.Event()
 
         def open_dialog():
-            dlg = tk.Toplevel(self._root)
-            dlg.title(title)
-            dlg.geometry("640x480")
-            dlg.transient(self._root)
+            dlg = tk.Toplevel(self._root); dlg.title(title); dlg.geometry("700x540"); dlg.transient(self._root)
+            nb = ttk.Notebook(dlg); nb.pack(fill="both", expand=True, padx=6, pady=6)
 
-            txt = scrolledtext.ScrolledText(dlg, wrap="none", font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
-            tb = self._create_ansi_toolbar(dlg, txt)
-            tb.pack(fill="x", padx=6, pady=2)
-            txt.pack(fill="both", expand=True, padx=6, pady=6)
-            txt.insert("1.0", initial)
-            self._apply_ansi_highlight(txt)
+            # Visual Tab
+            f_v = tk.Frame(nb); nb.add(f_v, text="Visual Editor")
+            txt_v = scrolledtext.ScrolledText(f_v, wrap="none", font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
+            self._create_ansi_toolbar(f_v, txt_v).pack(fill="x")
+            txt_v.pack(fill="both", expand=True); txt_v.insert("1.0", initial); self._apply_ansi_highlight(txt_v)
+
+            # Raw Tab
+            f_r = tk.Frame(nb); nb.add(f_r, text="Raw Code (Paste Art Here)")
+            txt_r = scrolledtext.ScrolledText(f_r, wrap="none", font=("Courier", 10))
+            txt_r.pack(fill="both", expand=True)
+
+            def sync(to_visual):
+                if to_visual:
+                    c = txt_r.get("1.0", "end-1c")
+                    txt_v.delete("1.0", tk.END); txt_v.insert("1.0", c); self._apply_ansi_highlight(txt_v)
+                else:
+                    c = txt_v.get("1.0", "end-1c")
+                    txt_r.delete("1.0", tk.END); txt_r.insert("1.0", c)
+
+            nb.bind("<<NotebookTabChanged>>", lambda e: sync(nb.index(nb.select())==0))
 
             def ok():
-                try: result["value"] = txt.get("1.0", "end-1c")
+                sync(False) # Ensure raw has latest
+                try: result["value"] = txt_r.get("1.0", "end-1c")
                 except Exception: result["value"] = ""
                 try: dlg.grab_release()
                 except Exception: pass
@@ -673,25 +691,31 @@ class GuiManager:
             elif isinstance(obj, Line):
                 add_entry("X1", "x1", obj.x1); add_entry("Y1", "y1", obj.y1)
                 add_entry("X2", "x2", obj.x2); add_entry("Y2", "y2", obj.y2)
-            elif isinstance(obj, Text):
-                tk.Label(frm, text="Content").grid(row=row, column=0, sticky="nw")
-                f2 = tk.Frame(frm)
-                f2.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-                txt = scrolledtext.ScrolledText(f2, height=10, width=40, font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
-                self._create_ansi_toolbar(f2, txt).pack(fill="x")
-                txt.pack(fill="both", expand=True)
-                txt.insert("1.0", obj.content)
-                self._apply_ansi_highlight(txt)
-                row += 1
-            elif isinstance(obj, Freehand):
-                tk.Label(frm, text="Lines").grid(row=row, column=0, sticky="nw")
-                f2 = tk.Frame(frm)
-                f2.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-                txt = scrolledtext.ScrolledText(f2, height=10, width=40, font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
-                self._create_ansi_toolbar(f2, txt).pack(fill="x")
-                txt.pack(fill="both", expand=True)
-                txt.insert("1.0", "\n".join(obj.lines))
-                self._apply_ansi_highlight(txt)
+            elif isinstance(obj, (Text, Freehand)):
+                tk.Label(frm, text="Content" if isinstance(obj, Text) else "Lines").grid(row=row, column=0, sticky="nw")
+                nb_inner = ttk.Notebook(frm); nb_inner.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+                # Visual
+                f_v = tk.Frame(nb_inner); nb_inner.add(f_v, text="Visual")
+                txt_v = scrolledtext.ScrolledText(f_v, height=10, width=40, font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
+                self._create_ansi_toolbar(f_v, txt_v).pack(fill="x")
+                txt_v.pack(fill="both", expand=True)
+                # Raw
+                f_r = tk.Frame(nb_inner); nb_inner.add(f_r, text="Raw")
+                txt_r = scrolledtext.ScrolledText(f_r, height=10, width=40, font=("Courier", 10))
+                txt_r.pack(fill="both", expand=True)
+
+                init_content = obj.content if isinstance(obj, Text) else "\n".join(obj.lines)
+                txt_v.insert("1.0", init_content); self._apply_ansi_highlight(txt_v)
+
+                def sync_inner(to_v):
+                    if to_v:
+                        c = txt_r.get("1.0", "end-1c")
+                        txt_v.delete("1.0", tk.END); txt_v.insert("1.0", c); self._apply_ansi_highlight(txt_v)
+                    else:
+                        c = txt_v.get("1.0", "end-1c")
+                        txt_r.delete("1.0", tk.END); txt_r.insert("1.0", c)
+
+                nb_inner.bind("<<NotebookTabChanged>>", lambda e: sync_inner(nb_inner.index(nb_inner.select())==0))
                 row += 1
 
             frm.grid_columnconfigure(1, weight=1)
@@ -710,10 +734,11 @@ class GuiManager:
                     elif isinstance(obj, Line):
                         props['x1'] = int(entries['x1'].get()); props['y1'] = int(entries['y1'].get())
                         props['x2'] = int(entries['x2'].get()); props['y2'] = int(entries['y2'].get())
-                    elif isinstance(obj, Text):
-                        props['content'] = txt.get("1.0", "end-1c")
-                    elif isinstance(obj, Freehand):
-                        raw = txt.get("1.0", "end-1c"); props['lines'] = [ln.rstrip("\n") for ln in raw.splitlines()]
+                    elif isinstance(obj, (Text, Freehand)):
+                        sync_inner(False)
+                        raw = txt_r.get("1.0", "end-1c")
+                        if isinstance(obj, Text): props['content'] = raw
+                        else: props['lines'] = [ln.rstrip("\n") for ln in raw.splitlines()]
                 except Exception: pass
                 result['props'] = props
                 try: dlg.grab_release()
@@ -940,15 +965,13 @@ class Designer:
         except Exception: pass
         for i, c in enumerate(Color, 1):
             try:
-                color_name = c.name
-                if "BOLD" in color_name:
-                    base_color_name = color_name.split("_")[1]
-                else:
-                    base_color_name = color_name
-                curses_color = getattr(curses, f"COLOR_{base_color_name}", curses.COLOR_WHITE)
-                curses.init_pair(i, curses_color, -1)
-            except Exception:
-                pass
+                cn = c.name; fg, bg = curses.COLOR_WHITE, -1
+                if cn.startswith("BG_B_"): bg = getattr(curses, f"COLOR_{cn[5:]}", curses.COLOR_BLACK)
+                elif cn.startswith("BG_"): bg = getattr(curses, f"COLOR_{cn[3:]}", curses.COLOR_BLACK)
+                elif cn.startswith("B_"): fg = getattr(curses, f"COLOR_{cn[2:]}", curses.COLOR_WHITE)
+                else: fg = getattr(curses, f"COLOR_{cn}", curses.COLOR_WHITE)
+                curses.init_pair(i, fg, bg)
+            except Exception: pass
         self.stdscr.nodelay(True)
 
         # initial GUI sync
@@ -1209,15 +1232,17 @@ class Designer:
         cur_attr = default_attr
 
         def get_color_from_ansi(codes: List[str]) -> Optional[Color]:
-            is_bold = "1" in codes
-            color_codes = [c for c in codes if c not in ("0", "1")]
-            if not color_codes: return None
-            try:
-                c_val = int(color_codes[0])
-                if is_bold and 30 <= c_val <= 37: c_val += 60
-                for col in Color:
-                    if col.value == c_val: return col
-            except Exception: pass
+            is_bold = "1" in codes; cv = []
+            for c in codes:
+                try:
+                    v = int(c)
+                    if (30<=v<=37) or (40<=v<=47) or (90<=v<=97) or (100<=v<=107): cv.append(v)
+                except: pass
+            if not cv: return None
+            v = cv[-1]
+            if is_bold and (30<=v<=37 or 40<=v<=47): v += 60
+            for col in Color:
+                if col.value == v: return col
             return None
 
         for part in parts:
@@ -1272,7 +1297,7 @@ class Designer:
     def _draw_obj(self, o: UIElement, bx: int, by: int, is_sel: bool, is_in_group: bool = False):
         try:
             attr = curses.color_pair(list(Color).index(o.color) + 1)
-            if "BOLD" in o.color.name: attr |= curses.A_BOLD
+            if o.color.name.startswith("B_") or "_B_" in o.color.name: attr |= curses.A_BOLD
         except Exception: attr = curses.A_NORMAL
         if is_sel: attr |= (curses.A_BOLD | curses.A_REVERSE)
         if is_in_group: attr |= curses.A_DIM
