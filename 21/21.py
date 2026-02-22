@@ -582,19 +582,38 @@ class GuiManager:
                 if cu: txt.tag_add("ansi_underline", ids, ide)
                 if cbl: txt.tag_add("ansi_blink", ids, ide)
 
+    def _strip_codes(self, txt, start=None, end=None):
+        if start is None or end is None:
+            try:
+                if txt.tag_ranges(tk.SEL):
+                    start, end = txt.index(tk.SEL_FIRST), txt.index(tk.SEL_LAST)
+                else:
+                    start, end = "1.0", tk.END
+            except Exception:
+                start, end = "1.0", tk.END
+
+        content = txt.get(start, end)
+        stripped = re.sub(r'\x1b\[[0-9;]*m', '', content)
+        txt.delete(start, end)
+        txt.insert(start, stripped)
+        self._apply_ansi_highlight(txt)
+
     def _smart_ins(self, txt, code):
         try:
             if txt.tag_ranges(tk.SEL):
-                start, end = txt.index(tk.SEL_FIRST), txt.index(tk.SEL_LAST)
+                start = txt.index(tk.SEL_FIRST)
+                # First strip internal codes from selection
+                self._strip_codes(txt, start, txt.index(tk.SEL_LAST))
+                # Selection might have changed index because codes were removed
+                # Re-get selection end
+                end = txt.index(tk.SEL_LAST)
                 txt.insert(end, "\x1b[0m")
                 txt.insert(start, code)
             else:
-                # Check if we are right after another escape code to avoid piling
                 cur = txt.index(tk.INSERT)
                 prev_text = txt.get(f"{cur}-10c", cur)
                 m = re.search(r'\x1b\[[0-9;]*m$', prev_text)
                 if m:
-                    # Replace previous code if it was just there
                     txt.delete(f"{cur}-{len(m.group(0))}c", cur)
                 txt.insert(tk.INSERT, code)
         except Exception:
@@ -628,6 +647,7 @@ class GuiManager:
 
         ctrl = tk.Frame(frame); ctrl.pack(fill="x", pady=2)
         tk.Button(ctrl, text="RESET (\\e[0m)", font=("Arial", 7, "bold"), command=lambda: self._smart_ins(text_widget, "\x1b[0m")).pack(side="left", padx=4)
+        tk.Button(ctrl, text="STRIP CODES", bg="#ffcccc", font=("Arial", 7, "bold"), command=lambda: self._strip_codes(text_widget)).pack(side="left", padx=4)
         tk.Button(ctrl, text="Re-Highlight", font=("Arial", 7), command=lambda: self._apply_ansi_highlight(text_widget)).pack(side="right")
         return frame
 
