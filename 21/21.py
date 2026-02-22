@@ -327,8 +327,10 @@ class GuiManager:
             tk.Button(af, text="Insert Selected", bg="#ddffdd", command=lambda: self._emit("INSERT_ASSET")).pack(side="left", padx=6)
             tk.Button(af, text="Delete Asset", command=self._delete_asset).pack(side="right", padx=6)
 
-            # Save asset from curses
-            tk.Button(root, text="Save Selected Object to Library", bg="#ffeebb", command=lambda: self._emit("SAVE_ASSET")).pack(fill="x", padx=6, pady=6)
+            # Bottom buttons
+            bf2 = tk.Frame(root); bf2.pack(fill="x", side="bottom", padx=6, pady=6)
+            tk.Button(bf2, text="COMPILE (Generate C++)", bg="#ccffcc", font=("Arial", 10, "bold"), command=lambda: self._emit("COMPILE")).pack(fill="x", pady=2)
+            tk.Button(bf2, text="Save Selected Object to Library", bg="#ffeebb", command=lambda: self._emit("SAVE_ASSET")).pack(fill="x", pady=2)
 
             # mark ready and start Tk mainloop
             self.ready.set()
@@ -529,6 +531,34 @@ class GuiManager:
         except Exception:
             pass
 
+    def _apply_ansi_highlight(self, txt):
+        content = txt.get("1.0", tk.END)
+        for tag in txt.tag_names():
+            if tag.startswith("ansi"): txt.tag_remove(tag, "1.0", tk.END)
+
+        colors = {"31":"#ff5555", "32":"#55ff55", "33":"#ffff55", "34":"#5555ff", "35":"#ff55ff", "36":"#55ffff", "37":"#ffffff"}
+        for c, color in colors.items():
+            txt.tag_configure(f"ansi_{c}", foreground=color)
+            txt.tag_configure(f"ansi_bold_{c}", foreground=color, font=("Courier", 10, "bold"))
+        txt.tag_configure("ansi_code", elide=True)
+
+        import re
+        ansi_pattern = re.compile(r'\x1b\[([0-9;]*)m')
+        matches = list(ansi_pattern.finditer(content))
+        cur_fg, cur_bold = "37", False
+
+        for i, m in enumerate(matches):
+            txt.tag_add("ansi_code", f"1.0 + {m.start()} chars", f"1.0 + {m.end()} chars")
+            for c in m.group(1).split(';'):
+                if c == "0": cur_fg, cur_bold = "37", False
+                elif c == "1": cur_bold = True
+                elif "31" <= c <= "37": cur_fg = c
+
+            t_start, t_end = m.end(), (matches[i+1].start() if i+1 < len(matches) else len(content))
+            if t_start < t_end:
+                tag = f"ansi_{cur_fg}" if not cur_bold else f"ansi_bold_{cur_fg}"
+                txt.tag_add(tag, f"1.0 + {t_start} chars", f"1.0 + {t_end} chars")
+
     def _create_ansi_toolbar(self, parent, text_widget):
         toolbar = tk.Frame(parent)
         colors = [
@@ -541,9 +571,12 @@ class GuiManager:
             ("BY", "\x1b[1;33m"), ("BB", "\x1b[1;34m"), ("BM", "\x1b[1;35m"),
             ("BC", "\x1b[1;36m")
         ]
-        def ins(c): text_widget.insert(tk.INSERT, c)
+        def ins(c):
+            text_widget.insert(tk.INSERT, c)
+            self._apply_ansi_highlight(text_widget)
         for n, c in colors: tk.Button(toolbar, text=n, command=lambda x=c: ins(x), width=2, font=("Arial", 7)).pack(side="left")
         for n, c in bold_colors: tk.Button(toolbar, text=n, command=lambda x=c: ins(x), width=2, font=("Arial", 7)).pack(side="left")
+        tk.Button(toolbar, text="Clear Highlight", command=lambda: self._apply_ansi_highlight(text_widget), font=("Arial", 7)).pack(side="right")
         return toolbar
 
     # Blocking editors (Designer calls)
@@ -559,17 +592,16 @@ class GuiManager:
             dlg.geometry("640x480")
             dlg.transient(self._root)
 
-            txt = scrolledtext.ScrolledText(dlg, wrap="none", font=("Courier", 10))
+            txt = scrolledtext.ScrolledText(dlg, wrap="none", font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
             tb = self._create_ansi_toolbar(dlg, txt)
             tb.pack(fill="x", padx=6, pady=2)
             txt.pack(fill="both", expand=True, padx=6, pady=6)
             txt.insert("1.0", initial)
+            self._apply_ansi_highlight(txt)
 
             def ok():
-                try:
-                    result["value"] = txt.get("1.0", "end-1c")
-                except Exception:
-                    result["value"] = ""
+                try: result["value"] = txt.get("1.0", "end-1c")
+                except Exception: result["value"] = ""
                 try: dlg.grab_release()
                 except Exception: pass
                 dlg.destroy(); ev.set()
@@ -580,6 +612,7 @@ class GuiManager:
                 except Exception: pass
                 dlg.destroy(); ev.set()
 
+            dlg.protocol("WM_DELETE_WINDOW", cancel)
             btnf = tk.Frame(dlg); btnf.pack(fill="x", padx=6, pady=6)
             tk.Button(btnf, text="OK", command=ok).pack(side="left", padx=6)
             tk.Button(btnf, text="Cancel", command=cancel).pack(side="left", padx=6)
@@ -625,6 +658,7 @@ class GuiManager:
                 row += 1
 
             add_entry("Name", "name", obj.name)
+            add_entry("Layer", "layer", obj.layer)
             tk.Label(frm, text="Color").grid(row=row, column=0, sticky="w")
             color_var = tk.StringVar(value=obj.color.name if hasattr(obj, "color") else "WHITE")
             color_combo = ttk.Combobox(frm, values=Color.names(), textvariable=color_var, state="readonly")
@@ -641,29 +675,31 @@ class GuiManager:
                 tk.Label(frm, text="Content").grid(row=row, column=0, sticky="nw")
                 f2 = tk.Frame(frm)
                 f2.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-                txt = scrolledtext.ScrolledText(f2, height=10, width=40, font=("Courier", 10))
+                txt = scrolledtext.ScrolledText(f2, height=10, width=40, font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
                 self._create_ansi_toolbar(f2, txt).pack(fill="x")
                 txt.pack(fill="both", expand=True)
                 txt.insert("1.0", obj.content)
+                self._apply_ansi_highlight(txt)
                 row += 1
             elif isinstance(obj, Freehand):
                 tk.Label(frm, text="Lines").grid(row=row, column=0, sticky="nw")
                 f2 = tk.Frame(frm)
                 f2.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-                txt = scrolledtext.ScrolledText(f2, height=10, width=40, font=("Courier", 10))
+                txt = scrolledtext.ScrolledText(f2, height=10, width=40, font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
                 self._create_ansi_toolbar(f2, txt).pack(fill="x")
                 txt.pack(fill="both", expand=True)
                 txt.insert("1.0", "\n".join(obj.lines))
+                self._apply_ansi_highlight(txt)
                 row += 1
 
             frm.grid_columnconfigure(1, weight=1)
 
             def on_ok():
                 props: Dict[str, Any] = {}
-                try:
-                    props['name'] = entries.get('name').get().strip() if 'name' in entries else obj.name
-                except Exception:
-                    props['name'] = obj.name
+                try: props['name'] = entries.get('name').get().strip() if 'name' in entries else obj.name
+                except Exception: props['name'] = obj.name
+                try: props['layer'] = int(entries['layer'].get()) if 'layer' in entries else obj.layer
+                except Exception: pass
                 props['color'] = color_var.get()
                 try:
                     if isinstance(obj, Box):
@@ -676,9 +712,7 @@ class GuiManager:
                         props['content'] = txt.get("1.0", "end-1c")
                     elif isinstance(obj, Freehand):
                         raw = txt.get("1.0", "end-1c"); props['lines'] = [ln.rstrip("\n") for ln in raw.splitlines()]
-                except Exception:
-                    # ignore conversion errors; caller will validate
-                    pass
+                except Exception: pass
                 result['props'] = props
                 try: dlg.grab_release()
                 except Exception: pass
@@ -690,6 +724,7 @@ class GuiManager:
                 except Exception: pass
                 dlg.destroy(); ev.set()
 
+            dlg.protocol("WM_DELETE_WINDOW", on_cancel)
             btnf = tk.Frame(dlg); btnf.pack(fill="x", padx=6, pady=6)
             tk.Button(btnf, text="OK", command=on_ok).pack(side="left", padx=6)
             tk.Button(btnf, text="Cancel", command=on_cancel).pack(side="left", padx=6)
@@ -901,11 +936,16 @@ class Designer:
                     if self._valid_sel() and data:
                         o = self.cur_objs[self.sel_idx]; lib = self.gui._load_lib()
                         d = o.to_dict(); d['name'] = data; lib[data] = d; self.gui._write_lib(lib)
-                        # ask GUI to refresh assets immediately
                         if self.gui._root:
                             try: self.gui._root.after(0, self.gui._refresh_assets)
                             except Exception: pass
                         self.msg = f"Saved asset '{data}'"
+                elif cmd == "COMPILE":
+                    try:
+                        self.pm.save_project(self.screens); self.pm.save_json_state(self.screens)
+                        self.msg = "Project COMPILED and Saved"
+                    except Exception as e:
+                        self.msg = f"Compile error: {e}"
                 elif cmd == "INSERT_ASSET":
                     lib = self.gui._load_lib()
                     if data in lib:
@@ -996,6 +1036,7 @@ class Designer:
             if k == ord('e') and self._valid_sel():
                 target = self.cur_objs[self.sel_idx]
                 try:
+                    target.layer = self.sel_idx
                     props = self.gui.edit_props_blocking(target)
                 except Exception:
                     props = None
@@ -1004,6 +1045,12 @@ class Designer:
                         nm = props.get('name', target.name); nm_safe = re.sub(r'[^a-zA-Z0-9_]', '', nm) or target.name
                         target.name = nm_safe
                         target.color = Color.from_str(props.get('color', target.color.name))
+                        if 'layer' in props:
+                            new_layer = max(0, min(len(self.cur_objs)-1, int(props['layer'])))
+                            if new_layer != self.sel_idx:
+                                obj = self.cur_objs.pop(self.sel_idx)
+                                self.cur_objs.insert(new_layer, obj)
+                                self.sel_idx = new_layer
                         if isinstance(target, Box):
                             target.x = int(props.get('x', target.x)); target.y = int(props.get('y', target.y))
                             target.w = max(1, int(props.get('w', target.w))); target.h = max(1, int(props.get('h', target.h)))
@@ -1025,6 +1072,15 @@ class Designer:
                 self.msg = "GROUP mode: SPACE to toggle, ENTER to confirm, ESC to cancel"
             if k == ord('u') and self._valid_sel():
                 self._do_ungroup()
+
+            if (k == ord('+') or k == ord('=')) and self._valid_sel() and self.sel_idx < len(self.cur_objs) - 1:
+                idx = self.sel_idx
+                self.cur_objs[idx], self.cur_objs[idx+1] = self.cur_objs[idx+1], self.cur_objs[idx]
+                self.sel_idx += 1; self.msg = "Layer UP"
+            if (k == ord('-') or k == ord('_')) and self._valid_sel() and self.sel_idx > 0:
+                idx = self.sel_idx
+                self.cur_objs[idx], self.cur_objs[idx-1] = self.cur_objs[idx-1], self.cur_objs[idx]
+                self.sel_idx -= 1; self.msg = "Layer DOWN"
             if k == ord('o') and self._valid_sel():
                 o = self.cur_objs[self.sel_idx]
                 if isinstance(o, MetaObject):
