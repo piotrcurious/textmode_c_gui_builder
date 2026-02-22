@@ -275,7 +275,7 @@ class GuiManager:
         self._root: Optional[tk.Tk] = None
         self._lst_screens: Optional[tk.Listbox] = None
         self._lst_assets: Optional[tk.Listbox] = None
-        self._help_var: Optional[tk.StringVar] = None
+        self._help_text_widget: Optional[scrolledtext.ScrolledText] = None
         self.ready = threading.Event()
         self._lock = threading.Lock()
         self._last_update = 0.0
@@ -304,9 +304,8 @@ class GuiManager:
             # Help tab
             f_help = tk.Frame(nb)
             nb.add(f_help, text="Help & Status")
-            self._help_var = tk.StringVar(value="Initializing...")
-            lbl = tk.Label(f_help, textvariable=self._help_var, justify="left", anchor="nw", font=("Consolas", 10), wraplength=420)
-            lbl.pack(fill="both", expand=True, padx=6, pady=6)
+            self._help_text_widget = scrolledtext.ScrolledText(f_help, font=("Consolas", 10), wrap="word", state="disabled", bg="#f0f0f0")
+            self._help_text_widget.pack(fill="both", expand=True, padx=6, pady=6)
 
             # Screens
             f_scr = tk.Frame(nb)
@@ -474,8 +473,11 @@ class GuiManager:
                 return
             # help text
             try:
-                if self._help_var is not None and self._help_var.get() != self._last_help:
-                    self._help_var.set(self._last_help)
+                if self._help_text_widget:
+                    self._help_text_widget.configure(state="normal")
+                    self._help_text_widget.delete("1.0", tk.END)
+                    self._help_text_widget.insert("1.0", self._last_help)
+                    self._help_text_widget.configure(state="disabled")
             except Exception:
                 pass
 
@@ -872,6 +874,58 @@ class Designer:
     def _valid_sel(self) -> bool:
         return 0 <= self.sel_idx < len(self.cur_objs)
 
+    def _get_detailed_help(self) -> str:
+        h = [f"STATUS: {self.msg}", ""]
+        if self.mode == Mode.NAV:
+            h.append("--- NAVIGATION MODE ---")
+            h.append("Arrows: Move cursor")
+            h.append("Tab: Cycle selection")
+            h.append("b / l / t: Create Box / Line / Text")
+            if self._valid_sel():
+                o = self.cur_objs[self.sel_idx]
+                h.append(f"\nSELECTED: {o.name} ({o.type})")
+                h.append("  Arrows: Move object")
+                h.append("  e: Edit properties (Tk window)")
+                h.append("  n: Rename object")
+                h.append("  c: Cycle color")
+                h.append("  d: Delete selected")
+                h.append("  r: Resize mode")
+                h.append("  + / - or [ / ]: Change Layer (order)")
+                h.append("  g: Start Grouping with this item")
+                if isinstance(o, MetaObject):
+                    h.append("  u: Ungroup")
+                    h.append("  o: Open group for internal editing")
+            h.append("\ns: Save Project")
+            h.append("q: Quit")
+        elif self.mode == Mode.GROUP:
+            h.append("--- GROUPING MODE ---")
+            h.append("Tab: Cycle selection")
+            h.append("Space: Toggle item in group")
+            h.append("Enter: Confirm Group")
+            h.append("Esc: Cancel")
+        elif self.mode == Mode.RESIZE:
+            h.append("--- RESIZE MODE ---")
+            h.append("Arrows: Resize selected object")
+            h.append("Esc: Finish/Cancel")
+        elif self.mode in (Mode.BOX_1, Mode.BOX_2, Mode.LINE_1, Mode.LINE_2):
+            h.append("--- CREATION MODE ---")
+            h.append("Arrows: Move cursor")
+            h.append("Enter: Set point")
+            h.append("Esc: Cancel")
+
+        if self.edit_stack:
+            h.append("")
+            h.append("--- META EDITING ---")
+            h.append(f"Inside: {self.edit_stack[-1].name}")
+            h.append("Esc: Exit to parent")
+        return "\n".join(h)
+
+    def _update_gui(self):
+        try:
+            self.gui.update_state(self._get_detailed_help(), [s.name for s in self.screens], self.cur_screen.name)
+        except Exception:
+            pass
+
     def _clamp_sel(self):
         if not self.cur_objs:
             self.sel_idx = -1
@@ -898,7 +952,7 @@ class Designer:
         self.stdscr.nodelay(True)
 
         # initial GUI sync
-        self.gui.update_state("Ready.", [s.name for s in self.screens], self.cur_screen.name)
+        self._update_gui()
 
         while True:
             self._clamp_sel()
@@ -912,6 +966,7 @@ class Designer:
                 continue
             if not self._handle_key(key):
                 break
+            self._update_gui()
 
     def _process_gui_queue(self):
         try:
@@ -963,11 +1018,7 @@ class Designer:
                             while new_obj.name in used or not new_obj.name:
                                 new_obj.name = f"{base}_{cnt}"; cnt += 1
                             self.cur_objs.append(new_obj); self.sel_idx = len(self.cur_objs)-1; self.msg = f"Inserted {new_obj.name}"
-                # after processing, sync GUI state (rate-limited)
-                try:
-                    self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
-                except Exception:
-                    pass
+                self._update_gui()
         except queue.Empty:
             pass
 
@@ -1096,9 +1147,7 @@ class Designer:
             if k == ord(']') and self._valid_sel() and self.sel_idx < len(self.cur_objs) - 1:
                 self.cur_objs[self.sel_idx + 1], self.cur_objs[self.sel_idx] = self.cur_objs[self.sel_idx], self.cur_objs[self.sel_idx + 1]
                 self.sel_idx += 1; self.msg = "Moved forward"
-            # ask GUI to refresh (rate-limited)
-            try: self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
-            except Exception: pass
+
             return True
 
         if self.mode == Mode.GROUP:
@@ -1120,16 +1169,12 @@ class Designer:
             name = f"box_{len(self.cur_objs)}"
             new = Box(name=name, color=Color.WHITE, x=x, y=y, w=w, h=h, layer=len(self.cur_objs))
             self.cur_objs.append(new); self.sel_idx = len(self.cur_objs) - 1; self.mode = Mode.NAV; self.msg = f"Created {name}"
-            try: self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
-            except Exception: pass
         elif self.mode == Mode.LINE_1 and k in (10, 13):
             self.temp = {'x': self.cx, 'y': self.cy}; self.mode = Mode.LINE_2; self.msg = "Line: set end -> Enter"
         elif self.mode == Mode.LINE_2 and k in (10, 13):
             name = f"line_{len(self.cur_objs)}"
             new = Line(name=name, color=Color.WHITE, x1=self.temp['x'], y1=self.temp['y'], x2=self.cx, y2=self.cy, layer=len(self.cur_objs))
             self.cur_objs.append(new); self.sel_idx = len(self.cur_objs) - 1; self.mode = Mode.NAV; self.msg = f"Created {name}"
-            try: self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
-            except Exception: pass
 
         return True
 
@@ -1144,8 +1189,6 @@ class Designer:
         name = f"txt_{len(self.cur_objs)}"
         new = Text(name=name, color=Color.WHITE, x=self.cx, y=self.cy, content=str(txt), layer=len(self.cur_objs))
         self.cur_objs.append(new); self.sel_idx = len(self.cur_objs) - 1; self.msg = f"Added {name}"
-        try: self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
-        except Exception: pass
 
     def _rename_obj(self):
         curses.echo()
@@ -1159,8 +1202,6 @@ class Designer:
             safe = re.sub(r'[^a-zA-Z0-9_]', '', t)
             if safe:
                 self.cur_objs[self.sel_idx].name = safe; self.msg = f"Renamed to {safe}"
-                try: self.gui.update_state(self.msg, [s.name for s in self.screens], self.cur_screen.name)
-                except Exception: pass
 
     def _add_ansi_str(self, y: int, x: int, s: str, default_attr: int):
         parts = re.split(r'(\x1b\[[0-9;]*m)', s)
