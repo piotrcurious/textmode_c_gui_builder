@@ -28,12 +28,7 @@ public:
     void resetAttr() { Serial.print("\x1b[0m"); }
 
     void setColor(UI_Color color) {
-        int c = (int)color;
-        if (c >= 90 && c <= 97) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
-        else if (c >= 30 && c <= 37) { Serial.print("\x1b[0;"); Serial.print(c); Serial.print("m"); }
-        else if (c >= 40 && c <= 47) { Serial.print("\x1b["); Serial.print(c); Serial.print("m"); }
-        else if (c >= 100 && c <= 107) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
-        else { Serial.print("\x1b[0m"); }
+        Serial.print("\x1b["); Serial.print((int)color); Serial.print("m");
     }
 
     void moveCursor(int x, int y) {

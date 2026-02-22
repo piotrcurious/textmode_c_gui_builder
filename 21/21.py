@@ -47,12 +47,7 @@ public:
     void resetAttr() { Serial.print("\x1b[0m"); }
 
     void setColor(UI_Color color) {
-        int c = (int)color;
-        if (c >= 90 && c <= 97) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
-        else if (c >= 30 && c <= 37) { Serial.print("\x1b[0;"); Serial.print(c); Serial.print("m"); }
-        else if (c >= 40 && c <= 47) { Serial.print("\x1b["); Serial.print(c); Serial.print("m"); }
-        else if (c >= 100 && c <= 107) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
-        else { Serial.print("\x1b[0m"); }
+        Serial.print("\x1b["); Serial.print((int)color); Serial.print("m");
     }
 
     void moveCursor(int x, int y) {
@@ -541,18 +536,21 @@ class GuiManager:
             txt.tag_configure(f"ansi_fg_{i}", foreground=h)
             txt.tag_configure(f"ansi_bg_{i}", background=h)
         txt.tag_configure("ansi_bold", font=("Courier", 10, "bold"))
+        txt.tag_configure("ansi_dim", foreground="#666666")
+        txt.tag_configure("ansi_italic", font=("Courier", 10, "italic"))
+        txt.tag_configure("ansi_underline", underline=True)
+        txt.tag_configure("ansi_blink", overstrike=True)
         txt.tag_configure("ansi_code", elide=True, foreground="#777777")
 
     def _apply_ansi_highlight(self, txt):
-        # Prevent recursion if we ever modify text here
         content = txt.get("1.0", "end-1c")
         for tag in txt.tag_names():
             if tag.startswith("ansi"): txt.tag_remove(tag, "1.0", tk.END)
 
         ms = list(re.finditer(r'\x1b\[([0-9;]*)m', content))
-        cfg, cbg, cb = "15", None, False
+        cfg, cbg = "15", None
+        cb, cd, ci, cu, cbl = False, False, False, False, False
 
-        # Apply default color to beginning if no code starts at 1.0
         if not ms or ms[0].start() > 0:
             end_pos = ms[0].start() if ms else len(content)
             txt.tag_add("ansi_fg_15", "1.0", f"1.0 + {end_pos} chars")
@@ -560,8 +558,14 @@ class GuiManager:
         for i, m in enumerate(ms):
             txt.tag_add("ansi_code", f"1.0 + {m.start()} chars", f"1.0 + {m.end()} chars")
             for c in m.group(1).split(';'):
-                if c == "0" or c == "": cfg, cbg, cb = "15", None, False
+                if c == "0" or c == "":
+                    cfg, cbg = "15", None
+                    cb, cd, ci, cu, cbl = False, False, False, False, False
                 elif c == "1": cb = True
+                elif c == "2": cd = True
+                elif c == "3": ci = True
+                elif c == "4": cu = True
+                elif c == "5": cbl = True
                 elif "30"<=c<="37": cfg = str(int(c)-30)
                 elif "90"<=c<="97": cfg = str(int(c)-90+8)
                 elif "40"<=c<="47": cbg = str(int(c)-40)
@@ -573,6 +577,10 @@ class GuiManager:
                 txt.tag_add(f"ansi_fg_{cfg}", ids, ide)
                 if cbg: txt.tag_add(f"ansi_bg_{cbg}", ids, ide)
                 if cb: txt.tag_add("ansi_bold", ids, ide)
+                if cd: txt.tag_add("ansi_dim", ids, ide)
+                if ci: txt.tag_add("ansi_italic", ids, ide)
+                if cu: txt.tag_add("ansi_underline", ids, ide)
+                if cbl: txt.tag_add("ansi_blink", ids, ide)
 
     def _smart_ins(self, txt, code):
         try:
@@ -594,26 +602,33 @@ class GuiManager:
         self._apply_ansi_highlight(txt)
 
     def _create_ansi_toolbar(self, parent, text_widget):
-        frame = tk.Frame(parent); palette = {
-            "BLACK":"#000000", "RED":"#aa0000", "GREEN":"#00aa00", "YELLOW":"#aa5500", "BLUE":"#0000aa", "MAGENTA":"#aa00aa", "CYAN":"#00aaaa", "WHITE":"#aaaaaa",
-            "B_BLACK":"#555555", "B_RED":"#ff5555", "B_GREEN":"#55ff55", "B_YELLOW":"#ffff55", "B_BLUE":"#5555ff", "B_MAGENTA":"#ff55ff", "B_CYAN":"#55ffff", "B_WHITE":"#ffffff"
-        }
-        r1 = tk.Frame(frame); r1.pack(fill="x")
-        r2 = tk.Frame(frame); r2.pack(fill="x")
-        # Foreground row
-        tk.Label(r1, text="FG:", font=("Arial", 7)).pack(side="left")
-        for i, (name, hex) in enumerate(palette.items()):
-            code = f"\x1b[{Color[name].value}m" if "B_" not in name else f"\x1b[1;{Color[name].value-60}m"
-            fg = "#ffffff" if i < 8 and name != "WHITE" else "#000000"
-            tk.Button(r1, bg=hex, fg=fg, text=name[0] if "B_" not in name else "B"+name[2], width=2, font=("Arial", 7), command=lambda c=code: self._smart_ins(text_widget, c)).pack(side="left")
-        # Background row
-        tk.Label(r2, text="BG:", font=("Arial", 7)).pack(side="left")
-        for i, (name, hex) in enumerate(palette.items()):
-            bg_name = "BG_" + name
-            code = f"\x1b[{Color[bg_name].value}m"
-            tk.Button(r2, bg=hex, width=2, font=("Arial", 7), command=lambda c=code: self._smart_ins(text_widget, c)).pack(side="left")
-        tk.Button(r2, text="RESET", font=("Arial", 7, "bold"), command=lambda: self._smart_ins(text_widget, "\x1b[0m")).pack(side="left", padx=4)
-        tk.Button(r2, text="Highlight", font=("Arial", 7), command=lambda: self._apply_ansi_highlight(text_widget)).pack(side="right")
+        frame = tk.Frame(parent)
+        nb = ttk.Notebook(frame)
+        nb.pack(fill="x", expand=True)
+
+        palette_fg = ["BLACK", "RED", "GREEN", "YELLOW", "BLUE", "MAGENTA", "CYAN", "WHITE"]
+        palette_hex = ["#000000", "#aa0000", "#00aa00", "#aa5500", "#0000aa", "#aa00aa", "#00aaaa", "#aaaaaa"]
+        bright_hex = ["#555555", "#ff5555", "#55ff55", "#ffff55", "#5555ff", "#ff55ff", "#55ffff", "#ffffff"]
+
+        attr_names = ["Normal (0)", "Bold (1)", "Dim (2)", "Italic (3)", "Underline (4)", "Blink (5)"]
+        for attr_idx in range(6):
+            tab = tk.Frame(nb); nb.add(tab, text=attr_names[attr_idx])
+            for row_idx, (start_code, hex_list, label) in enumerate([
+                (30, palette_hex, "FG"), (40, palette_hex, "BG"),
+                (90, bright_hex, "FG-B"), (100, bright_hex, "BG-B")
+            ]):
+                r = tk.Frame(tab); r.pack(fill="x")
+                tk.Label(r, text=label+":", width=4, font=("Arial", 6)).pack(side="left")
+                for i in range(8):
+                    code = f"\x1b[{attr_idx};{start_code+i}m"
+                    bg_c = hex_list[i]
+                    fg_c = "#ffffff" if bg_c in ("#000000", "#aa0000", "#0000aa", "#555555") else "#000000"
+                    tk.Button(r, bg=bg_c, fg=fg_c, text=str(i), width=1, height=1, font=("Arial", 6),
+                              command=lambda c=code: self._smart_ins(text_widget, c)).pack(side="left", padx=1)
+
+        ctrl = tk.Frame(frame); ctrl.pack(fill="x", pady=2)
+        tk.Button(ctrl, text="RESET (\\e[0m)", font=("Arial", 7, "bold"), command=lambda: self._smart_ins(text_widget, "\x1b[0m")).pack(side="left", padx=4)
+        tk.Button(ctrl, text="Re-Highlight", font=("Arial", 7), command=lambda: self._apply_ansi_highlight(text_widget)).pack(side="right")
         return frame
 
     # Blocking editors (Designer calls)
@@ -818,8 +833,7 @@ class ProjectManager:
 
     def ensure_lib(self):
         try:
-            if not Path(self.LIB_FILE).exists():
-                Path(self.LIB_FILE).write_text(SERIAL_UI_HEADER, encoding="utf-8")
+            Path(self.LIB_FILE).write_text(SERIAL_UI_HEADER, encoding="utf-8")
         except Exception:
             pass
 
@@ -1264,38 +1278,32 @@ class Designer:
 
     def _add_ansi_str(self, y: int, x: int, s: str, default_attr: int):
         parts = re.split(r'(\x1b\[[0-9;]*m)', s)
-        cur_x = x
-        cur_attr = default_attr
-
-        def get_color_from_ansi(codes: List[str]) -> Optional[Color]:
-            is_bold = "1" in codes; cv = []
-            for c in codes:
-                try:
-                    v = int(c)
-                    if (30<=v<=37) or (40<=v<=47) or (90<=v<=97) or (100<=v<=107): cv.append(v)
-                except: pass
-            if not cv: return None
-            v = cv[-1]
-            if is_bold and (30<=v<=37 or 40<=v<=47): v += 60
-            for col in Color:
-                if col.value == v: return col
-            return None
-
+        cur_x, cur_attr = x, default_attr
         for part in parts:
             if not part: continue
             if part.startswith('\x1b['):
                 m = re.match(r'\x1b\[([0-9;]*)m', part)
                 if m:
                     codes = m.group(1).split(';')
-                    if '0' in codes:
+                    if '0' in codes or not m.group(1):
                         cur_attr = default_attr
-                    else:
-                        col = get_color_from_ansi(codes)
-                        if col:
-                            color_idx = list(Color).index(col) + 1
-                            cur_attr = (cur_attr & ~curses.A_COLOR) | curses.color_pair(color_idx)
-                            if "BOLD" in col.name: cur_attr |= curses.A_BOLD
-                        elif "1" in codes: cur_attr |= curses.A_BOLD
+                    for c in codes:
+                        if c == "1": cur_attr |= curses.A_BOLD
+                        elif c == "2": cur_attr |= curses.A_DIM
+                        elif c == "4": cur_attr |= curses.A_UNDERLINE
+                        elif c == "5": cur_attr |= curses.A_BLINK
+                        try:
+                            if c == "3": cur_attr |= curses.A_ITALIC
+                        except: pass
+                        try:
+                            v = int(c)
+                            if (30<=v<=37) or (40<=v<=47) or (90<=v<=97) or (100<=v<=107):
+                                for col in Color:
+                                    if col.value == v:
+                                        color_idx = list(Color).index(col) + 1
+                                        cur_attr = (cur_attr & ~curses.A_COLOR) | curses.color_pair(color_idx)
+                                        break
+                        except: pass
             else:
                 try:
                     self.stdscr.addstr(y, cur_x, part, cur_attr)
