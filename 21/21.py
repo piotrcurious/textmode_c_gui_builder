@@ -532,10 +532,7 @@ class GuiManager:
         except Exception:
             pass
 
-    def _apply_ansi_highlight(self, txt):
-        content = txt.get("1.0", tk.END)
-        for tag in txt.tag_names():
-            if tag.startswith("ansi"): txt.tag_remove(tag, "1.0", tk.END)
+    def _setup_ansi_tags(self, txt):
         palette = {
             "0":"#000000", "1":"#aa0000", "2":"#00aa00", "3":"#aa5500", "4":"#0000aa", "5":"#aa00aa", "6":"#00aaaa", "7":"#aaaaaa",
             "8":"#555555", "9":"#ff5555", "10":"#55ff55", "11":"#ffff55", "12":"#5555ff", "13":"#ff55ff", "14":"#55ffff", "15":"#ffffff"
@@ -543,24 +540,58 @@ class GuiManager:
         for i, h in palette.items():
             txt.tag_configure(f"ansi_fg_{i}", foreground=h)
             txt.tag_configure(f"ansi_bg_{i}", background=h)
-        txt.tag_configure("ansi_bold", font=("Courier", 10, "bold")); txt.tag_configure("ansi_code", elide=True)
-        ansi_p = re.compile(r'\x1b\[([0-9;]*)m')
-        ms = list(ansi_p.finditer(content)); cfg, cbg, cb = "15", None, False
+        txt.tag_configure("ansi_bold", font=("Courier", 10, "bold"))
+        txt.tag_configure("ansi_code", elide=True, foreground="#777777")
+
+    def _apply_ansi_highlight(self, txt):
+        # Prevent recursion if we ever modify text here
+        content = txt.get("1.0", "end-1c")
+        for tag in txt.tag_names():
+            if tag.startswith("ansi"): txt.tag_remove(tag, "1.0", tk.END)
+
+        ms = list(re.finditer(r'\x1b\[([0-9;]*)m', content))
+        cfg, cbg, cb = "15", None, False
+
+        # Apply default color to beginning if no code starts at 1.0
+        if not ms or ms[0].start() > 0:
+            end_pos = ms[0].start() if ms else len(content)
+            txt.tag_add("ansi_fg_15", "1.0", f"1.0 + {end_pos} chars")
+
         for i, m in enumerate(ms):
             txt.tag_add("ansi_code", f"1.0 + {m.start()} chars", f"1.0 + {m.end()} chars")
             for c in m.group(1).split(';'):
-                if c == "0": cfg, cbg, cb = "15", None, False
+                if c == "0" or c == "": cfg, cbg, cb = "15", None, False
                 elif c == "1": cb = True
                 elif "30"<=c<="37": cfg = str(int(c)-30)
                 elif "90"<=c<="97": cfg = str(int(c)-90+8)
                 elif "40"<=c<="47": cbg = str(int(c)-40)
                 elif "100"<=c<="107": cbg = str(int(c)-100+8)
+
             ts, te = m.end(), (ms[i+1].start() if i+1 < len(ms) else len(content))
             if ts < te:
                 ids, ide = f"1.0 + {ts} chars", f"1.0 + {te} chars"
                 txt.tag_add(f"ansi_fg_{cfg}", ids, ide)
                 if cbg: txt.tag_add(f"ansi_bg_{cbg}", ids, ide)
                 if cb: txt.tag_add("ansi_bold", ids, ide)
+
+    def _smart_ins(self, txt, code):
+        try:
+            if txt.tag_ranges(tk.SEL):
+                start, end = txt.index(tk.SEL_FIRST), txt.index(tk.SEL_LAST)
+                txt.insert(end, "\x1b[0m")
+                txt.insert(start, code)
+            else:
+                # Check if we are right after another escape code to avoid piling
+                cur = txt.index(tk.INSERT)
+                prev_text = txt.get(f"{cur}-10c", cur)
+                m = re.search(r'\x1b\[[0-9;]*m$', prev_text)
+                if m:
+                    # Replace previous code if it was just there
+                    txt.delete(f"{cur}-{len(m.group(0))}c", cur)
+                txt.insert(tk.INSERT, code)
+        except Exception:
+            txt.insert(tk.INSERT, code)
+        self._apply_ansi_highlight(txt)
 
     def _create_ansi_toolbar(self, parent, text_widget):
         frame = tk.Frame(parent); palette = {
@@ -569,20 +600,19 @@ class GuiManager:
         }
         r1 = tk.Frame(frame); r1.pack(fill="x")
         r2 = tk.Frame(frame); r2.pack(fill="x")
-        def ins(c): text_widget.insert(tk.INSERT, c); self._apply_ansi_highlight(text_widget)
         # Foreground row
         tk.Label(r1, text="FG:", font=("Arial", 7)).pack(side="left")
         for i, (name, hex) in enumerate(palette.items()):
             code = f"\x1b[{Color[name].value}m" if "B_" not in name else f"\x1b[1;{Color[name].value-60}m"
             fg = "#ffffff" if i < 8 and name != "WHITE" else "#000000"
-            tk.Button(r1, bg=hex, fg=fg, text=name[0] if "B_" not in name else "B"+name[2], width=2, font=("Arial", 7), command=lambda c=code: ins(c)).pack(side="left")
+            tk.Button(r1, bg=hex, fg=fg, text=name[0] if "B_" not in name else "B"+name[2], width=2, font=("Arial", 7), command=lambda c=code: self._smart_ins(text_widget, c)).pack(side="left")
         # Background row
         tk.Label(r2, text="BG:", font=("Arial", 7)).pack(side="left")
         for i, (name, hex) in enumerate(palette.items()):
             bg_name = "BG_" + name
             code = f"\x1b[{Color[bg_name].value}m"
-            tk.Button(r2, bg=hex, width=2, font=("Arial", 7), command=lambda c=code: ins(c)).pack(side="left")
-        tk.Button(r2, text="RESET", font=("Arial", 7, "bold"), command=lambda: ins("\x1b[0m")).pack(side="left", padx=4)
+            tk.Button(r2, bg=hex, width=2, font=("Arial", 7), command=lambda c=code: self._smart_ins(text_widget, c)).pack(side="left")
+        tk.Button(r2, text="RESET", font=("Arial", 7, "bold"), command=lambda: self._smart_ins(text_widget, "\x1b[0m")).pack(side="left", padx=4)
         tk.Button(r2, text="Highlight", font=("Arial", 7), command=lambda: self._apply_ansi_highlight(text_widget)).pack(side="right")
         return frame
 
@@ -600,6 +630,9 @@ class GuiManager:
             # Visual Tab
             f_v = tk.Frame(nb); nb.add(f_v, text="Visual Editor")
             txt_v = scrolledtext.ScrolledText(f_v, wrap="none", font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
+            self._setup_ansi_tags(txt_v)
+            txt_v.bind("<KeyRelease>", lambda e: self._apply_ansi_highlight(txt_v))
+            txt_v.bind("<<Paste>>", lambda e: self._root.after(10, lambda: self._apply_ansi_highlight(txt_v)))
             self._create_ansi_toolbar(f_v, txt_v).pack(fill="x")
             txt_v.pack(fill="both", expand=True); txt_v.insert("1.0", initial); self._apply_ansi_highlight(txt_v)
 
@@ -697,6 +730,9 @@ class GuiManager:
                 # Visual
                 f_v = tk.Frame(nb_inner); nb_inner.add(f_v, text="Visual")
                 txt_v = scrolledtext.ScrolledText(f_v, height=10, width=40, font=("Courier", 10), bg="#222222", fg="#ffffff", insertbackground="white")
+                self._setup_ansi_tags(txt_v)
+                txt_v.bind("<KeyRelease>", lambda e: self._apply_ansi_highlight(txt_v))
+                txt_v.bind("<<Paste>>", lambda e: self._root.after(10, lambda: self._apply_ansi_highlight(txt_v)))
                 self._create_ansi_toolbar(f_v, txt_v).pack(fill="x")
                 txt_v.pack(fill="both", expand=True)
                 # Raw

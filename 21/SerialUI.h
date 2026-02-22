@@ -6,8 +6,10 @@
 #include <stdarg.h>
 
 enum class UI_Color {
-    WHITE=37, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36,
-    BOLD_WHITE=97, BOLD_RED=91, BOLD_GREEN=92, BOLD_YELLOW=93, BOLD_BLUE=94, BOLD_MAGENTA=95, BOLD_CYAN=96
+    BLACK=30, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36, WHITE=37,
+    B_BLACK=90, B_RED=91, B_GREEN=92, B_YELLOW=93, B_BLUE=94, B_MAGENTA=95, B_CYAN=96, B_WHITE=97,
+    BG_BLACK=40, BG_RED=41, BG_GREEN=42, BG_YELLOW=43, BG_BLUE=44, BG_MAGENTA=45, BG_CYAN=46, BG_WHITE=47,
+    BG_B_BLACK=100, BG_B_RED=101, BG_B_GREEN=102, BG_B_YELLOW=103, BG_B_BLUE=104, BG_B_MAGENTA=105, BG_B_CYAN=106, BG_B_WHITE=107
 };
 struct UI_Box { int16_t x, y, w, h; UI_Color color; };
 struct UI_Text { int16_t x, y; const char* content; UI_Color color; };
@@ -16,7 +18,7 @@ struct UI_Freehand { int16_t x, y; const char* const* lines; uint8_t count; UI_C
 
 class SerialUI {
 public:
-    void begin(long baud =  115200) { //TODO : decouple Serial.begin to make it more portable and allow passing serial object to allow multiple instances
+    void begin(long baud = 115200) {
         Serial.begin(baud);
         while (!Serial) delay(10);
         Serial.print("\x1b[?25l"); // Hide cursor
@@ -27,11 +29,11 @@ public:
 
     void setColor(UI_Color color) {
         int c = (int)color;
-        if (c >= 90) { // Bold
-            Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m");
-        } else {
-            Serial.print("\x1b[0;"); Serial.print(c); Serial.print("m");
-        }
+        if (c >= 90 && c <= 97) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
+        else if (c >= 30 && c <= 37) { Serial.print("\x1b[0;"); Serial.print(c); Serial.print("m"); }
+        else if (c >= 40 && c <= 47) { Serial.print("\x1b["); Serial.print(c); Serial.print("m"); }
+        else if (c >= 100 && c <= 107) { Serial.print("\x1b[1;"); Serial.print(c-60); Serial.print("m"); }
+        else { Serial.print("\x1b[0m"); }
     }
 
     void moveCursor(int x, int y) {
