@@ -1,112 +1,77 @@
 {
   "screens": [
     {
-      "name": "Main",
-      "objects": [
-        {
-          "name": "box_0",
-          "color": "WHITE",
-          "type": "BOX",
-          "layer": 0,
-          "x": 3,
-          "y": 2,
-          "w": 18,
-          "h": 4
-        },
-        {
-          "name": "box_1",
-          "color": "RED",
-          "type": "BOX",
-          "layer": 1,
-          "x": 6,
-          "y": 4,
-          "w": 27,
-          "h": 4
-        },
-        {
-          "name": "temperature_float_C",
-          "color": "WHITE",
-          "type": "TEXT",
-          "layer": 2,
-          "x": 17,
-          "y": 6,
-          "content": "%0.1f C"
-        }
-      ]
-    },
-    {
       "name": "Dashboard",
       "objects": [
         {
-          "name": "header_box",
+          "name": "bg",
           "color": "BLUE",
           "type": "BOX",
           "layer": 0,
           "x": 0,
           "y": 0,
-          "w": 60,
+          "w": 80,
+          "h": 24
+        },
+        {
+          "name": "temp_gauge",
+          "color": "WHITE",
+          "type": "BOX",
+          "layer": 1,
+          "x": 2,
+          "y": 2,
+          "w": 20,
           "h": 3
         },
         {
-          "name": "title",
-          "color": "WHITE",
-          "type": "TEXT",
-          "layer": 1,
-          "x": 20,
-          "y": 1,
-          "content": "SYSTEM DASHBOARD"
-        },
-        {
-          "name": "status_label",
+          "name": "temp_label",
           "color": "CYAN",
           "type": "TEXT",
           "layer": 2,
-          "x": 2,
-          "y": 5,
-          "content": "Status:"
+          "x": 4,
+          "y": 1,
+          "content": "TEMPERATURE"
         },
         {
-          "name": "status_val",
-          "color": "GREEN",
+          "name": "temp_val",
+          "color": "YELLOW",
           "type": "TEXT",
           "layer": 3,
-          "x": 10,
-          "y": 5,
-          "content": "ONLINE"
+          "x": 23,
+          "y": 3,
+          "content": "%0.1f C"
         },
         {
-          "name": "progress_bg",
-          "color": "WHITE",
+          "name": "status_box",
+          "color": "MAGENTA",
           "type": "BOX",
           "layer": 4,
-          "x": 2,
-          "y": 8,
-          "w": 22,
-          "h": 3
+          "x": 40,
+          "y": 2,
+          "w": 30,
+          "h": 5
         },
         {
-          "name": "progress_fill",
-          "color": "MAGENTA",
-          "type": "LINE",
+          "name": "status_text",
+          "color": "WHITE",
+          "type": "TEXT",
           "layer": 5,
-          "x1": 3,
-          "y1": 9,
-          "x2": 3,
-          "y2": 9
+          "x": 42,
+          "y": 4,
+          "content": "SYSTEM: INITIALIZING"
         }
       ]
     }
   ],
   "functions": [
     {
-      "name": "update_temp",
-      "signature": "float t",
-      "body": "ui.printfText(Layout_Main::temperature_float_C, \"%0.1f C\", t);"
-    },
-    {
-      "name": "set_online",
-      "signature": "bool online",
-      "body": "if (online) {\n        ui.drawText(Layout_Dashboard::status_val.x, Layout_Dashboard::status_val.y, \"ONLINE \", UI_Color::GREEN);\n    } else {\n        ui.drawText(Layout_Dashboard::status_val.x, Layout_Dashboard::status_val.y, \"OFFLINE\", UI_Color::RED);\n    }"
+      "name": "update_dashboard",
+      "signature": "float temp, bool ok",
+      "body": "ui.drawProgressBar(Layout_Dashboard::temp_gauge, temp, temp > 80 ? UI_Color::RED : UI_Color::GREEN);\n    ui.printfText(Layout_Dashboard::temp_val, \"%0.1f C\", temp);\n    if (ok) {\n        ui.drawText(Layout_Dashboard::status_text.x, Layout_Dashboard::status_text.y, \"SYSTEM: OK          \", UI_Color::GREEN);\n    } else {\n        ui.drawText(Layout_Dashboard::status_text.x, Layout_Dashboard::status_text.y, \"SYSTEM: ERROR       \", UI_Color::B_RED);\n    }",
+      "test_cases": [
+        "update_dashboard(ui, 25.4, true)",
+        "update_dashboard(ui, 85.0, false)"
+      ]
     }
   ]
 }

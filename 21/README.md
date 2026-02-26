@@ -11,6 +11,8 @@ A powerful, hybrid terminal/GUI tool for designing text-based user interfaces fo
 - **Layering**: Adjust the drawing order of objects.
 - **Asset Library**: Save and reuse UI components across projects.
 - **Function Lab**: Generate, edit, and test C++ functions that interact with your UI, all within the designer using a built-in mock environment and compiler.
+- **Template Library**: Manage global function blueprints with placeholders (`{{obj_name}}`, `{{screen_name}}`) to quickly generate consistent logic for UI elements.
+- **Persistent Test Cases**: Save and quickly run multiple test scenarios for each of your functions to verify behavior under different conditions.
 
 ## Quick Start
 
@@ -34,7 +36,7 @@ A powerful, hybrid terminal/GUI tool for designing text-based user interfaces fo
 | `e` | Edit properties of selected object (Tkinter) |
 | `r` | Enter **Resize Mode** (use arrows to resize) |
 | `n` | Rename selected object |
-| `f` | **Generate Function** for selected object |
+| `f` | **Apply Template** to generate a function for selected object |
 | `c` | Cycle through colors |
 | `d` | Delete selected object |
 | `+` / `-` | Move object up/down in layers |
@@ -50,18 +52,23 @@ A powerful, hybrid terminal/GUI tool for designing text-based user interfaces fo
 
 The Designer allows you to define "User Functions" that become part of your generated code. This is ideal for creating dynamic UI updates.
 
+### Template Library
+
+Templates are global blueprints. Use placeholders:
+- `{{obj_name}}`: The name of the selected UI element.
+- `{{screen_name}}`: The name of the current screen.
+- `{{type}}`: The type of the object (Box, Text, etc.).
+
+Press **f** on any object to pick a template and generate a function instantly.
+
 ### Example: Dynamic Temperature Display
 
 1. Create a Text object named `temp_val` with content `%0.1f C`.
-2. In the **Function Lab** tab:
-   - Click **New**, name it `updateTemp`, signature `float t`.
-   - Edit the body:
-     ```cpp
-     ui.printfText(Layout_Main::temp_val, t);
-     ```
-3. Click **TEST/RUN**:
-   - Enter `updateTemp(ui, 23.5);`
-   - See the result in the **Visual Output** area!
+2. Press **f** on it and select "Sensor Display" (or create a custom template).
+3. In the **Function Lab** tab, select the new `update_temp_val` function.
+4. Add a **Test Case**: `update_temp_val(ui, 23.5)`
+5. Click **TEST/RUN** with the test case selected.
+6. See the result in the **Visual Output** area!
 
 ### Integration in `.ino`:
 

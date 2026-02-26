@@ -56,6 +56,15 @@ SERIAL_UI_HEADER = r"""
       auto now = std::chrono::steady_clock::now();
       return std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
   }
+  inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
+      return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+  }
+  template<class T, class L, class H>
+  auto constrain(T amt, L low, H high) -> decltype(amt) {
+      return (amt < low) ? low : ((amt > high) ? high : amt);
+  }
+  inline long random(long max) { return rand() % max; }
+  inline long random(long min, long max) { return min + rand() % (max - min); }
 #endif
 
 enum class UI_Color {
@@ -304,6 +313,14 @@ class UserFunction:
     name: str
     signature: str = ""
     body: str = ""
+    test_cases: List[str] = field(default_factory=list)
+
+@dataclass
+class FunctionTemplate:
+    name: str
+    target_type: str = "ALL" # BOX, TEXT, LINE, FREEHAND, META, ALL
+    signature_pattern: str = ""
+    body_pattern: str = ""
 
 @dataclass
 class Screen:
@@ -333,6 +350,7 @@ class GuiManager:
         self._lst_screens: Optional[tk.Listbox] = None
         self._lst_assets: Optional[tk.Listbox] = None
         self._lst_functions: Optional[tk.Listbox] = None
+        self._lst_templates: Optional[tk.Listbox] = None
         self._help_text_widget: Optional[scrolledtext.ScrolledText] = None
         self._visual_out: Optional[scrolledtext.ScrolledText] = None
         self.ready = threading.Event()
@@ -342,6 +360,8 @@ class GuiManager:
         self._last_help: str = ""
         self._last_active: str = ""
         self._last_functions: List[str] = []
+        self._last_templates: List[str] = []
+        self._last_test_cases: List[str] = []
         self._update_interval = update_interval
         # start thread
         self._thr = threading.Thread(target=self._run_tk, daemon=True)
@@ -352,7 +372,7 @@ class GuiManager:
             root = tk.Tk()
             self._root = root
             root.title("UI Helper")
-            root.geometry("520x640")
+            root.geometry("640x780")
             try:
                 root.attributes('-topmost', True)
             except Exception:
@@ -395,12 +415,38 @@ class GuiManager:
             tk.Label(f_lab_top, text="User Functions:").pack(side="top", anchor="w")
             self._lst_functions = tk.Listbox(f_lab_top, height=5, exportselection=False)
             self._lst_functions.pack(fill="x", pady=2)
+            self._lst_functions.bind("<<ListboxSelect>>", lambda e: self._emit("SELECT_FUNCTION"))
 
             lf = tk.Frame(f_lab_top); lf.pack(fill="x")
             tk.Button(lf, text="New", command=lambda: self._emit("ADD_FUNCTION")).pack(side="left", padx=2)
             tk.Button(lf, text="Edit", command=lambda: self._emit("EDIT_FUNCTION")).pack(side="left", padx=2)
             tk.Button(lf, text="Delete", command=lambda: self._emit("DELETE_FUNCTION")).pack(side="left", padx=2)
-            tk.Button(lf, text="TEST/RUN", bg="#ccffcc", command=lambda: self._emit("TEST_FUNCTION")).pack(side="right", padx=2)
+
+            f_tc = tk.Frame(f_lab)
+            f_tc.pack(fill="x", padx=6, pady=4)
+            tk.Label(f_tc, text="Test Cases:").pack(side="top", anchor="w")
+            self._lst_test_cases = tk.Listbox(f_tc, height=4, exportselection=False)
+            self._lst_test_cases.pack(fill="x", pady=2)
+
+            tcf = tk.Frame(f_tc); tcf.pack(fill="x")
+            tk.Button(tcf, text="+ Case", command=lambda: self._emit("ADD_TEST_CASE")).pack(side="left", padx=2)
+            tk.Button(tcf, text="Edit Case", command=lambda: self._emit("EDIT_TEST_CASE")).pack(side="left", padx=2)
+            tk.Button(tcf, text="- Case", command=lambda: self._emit("DELETE_TEST_CASE")).pack(side="left", padx=2)
+            tk.Button(tcf, text="TEST/RUN", bg="#ccffcc", font=("Arial", 10, "bold"), command=lambda: self._emit("TEST_FUNCTION")).pack(side="right", padx=2)
+
+            # Template Library tab
+            f_temp = tk.Frame(nb)
+            nb.add(f_temp, text="Template Library")
+
+            tf_top = tk.Frame(f_temp); tf_top.pack(fill="x", padx=6, pady=6)
+            tk.Label(tf_top, text="Global Function Templates:").pack(side="top", anchor="w")
+            self._lst_templates = tk.Listbox(tf_top, height=10, exportselection=False)
+            self._lst_templates.pack(fill="x", pady=2)
+
+            tbf = tk.Frame(tf_top); tbf.pack(fill="x")
+            tk.Button(tbf, text="New Template", command=lambda: self._emit("ADD_TEMPLATE")).pack(side="left", padx=2)
+            tk.Button(tbf, text="Edit Selected", command=lambda: self._emit("EDIT_TEMPLATE")).pack(side="left", padx=2)
+            tk.Button(tbf, text="Delete", command=lambda: self._emit("DELETE_TEMPLATE")).pack(side="left", padx=2)
 
             tk.Label(f_lab, text="Visual Output (80x24 Simulation):").pack(padx=6, anchor="w")
             # Fixed width for 80 chars, height for 24 chars if possible
@@ -451,11 +497,28 @@ class GuiManager:
                 data = self._lst_assets.get(sel[0])
             elif cmd == "SAVE_ASSET":
                 data = simpledialog.askstring("Save Asset", "Name for this asset:", parent=self._root)
-            elif cmd in ("EDIT_FUNCTION", "DELETE_FUNCTION", "TEST_FUNCTION"):
+            elif cmd in ("SELECT_FUNCTION", "EDIT_FUNCTION", "DELETE_FUNCTION"):
                 sel = self._lst_functions.curselection()
                 if not sel: return
                 data = self._lst_functions.get(sel[0])
-            elif cmd == "ADD_FUNCTION":
+            elif cmd == "TEST_FUNCTION":
+                sel_f = self._lst_functions.curselection()
+                if not sel_f: return
+                fname = self._lst_functions.get(sel_f[0])
+                sel_tc = self._lst_test_cases.curselection()
+                tc = self._lst_test_cases.get(sel_tc[0]) if sel_tc else None
+                data = (fname, tc)
+            elif cmd in ("EDIT_TEST_CASE", "DELETE_TEST_CASE"):
+                sel = self._lst_test_cases.curselection()
+                if not sel: return
+                data = self._lst_test_cases.get(sel[0])
+            elif cmd == "ADD_TEST_CASE":
+                data = True
+            elif cmd in ("EDIT_TEMPLATE", "DELETE_TEMPLATE"):
+                sel = self._lst_templates.curselection()
+                if not sel: return
+                data = self._lst_templates.get(sel[0])
+            elif cmd in ("ADD_FUNCTION", "ADD_TEMPLATE"):
                 data = True
         except Exception:
             data = None
@@ -525,7 +588,7 @@ class GuiManager:
             pass
 
     # Public API: update_state called by Designer
-    def update_state(self, help_text: str, screens: List[str], active_screen: str, functions: List[str] = []):
+    def update_state(self, help_text: str, screens: List[str], active_screen: str, functions: List[str] = [], templates: List[str] = [], test_cases: List[str] = []):
         """
         Non-blocking: schedules a safe GUI update on Tk thread, rate-limited.
         Designer can call frequently; updates will be applied at most once per self._update_interval.
@@ -537,6 +600,8 @@ class GuiManager:
             self._last_screens = list(screens)
             self._last_active = active_screen
             self._last_functions = list(functions)
+            self._last_templates = list(templates)
+            self._last_test_cases = list(test_cases)
             # if enough time passed, schedule an immediate update
             if now - self._last_update >= self._update_interval:
                 self._last_update = now
@@ -642,6 +707,38 @@ class GuiManager:
                         if prev and prev in self._last_functions:
                             idx = self._last_functions.index(prev)
                             self._lst_functions.selection_set(idx)
+            except Exception:
+                pass
+
+            # test cases list
+            try:
+                if self._lst_test_cases:
+                    cur = self._listbox_items(self._lst_test_cases)
+                    if cur != self._last_test_cases:
+                        prev = None
+                        sel = self._lst_test_cases.curselection()
+                        if sel: prev = self._lst_test_cases.get(sel[0])
+                        self._lst_test_cases.delete(0, tk.END)
+                        for tc in self._last_test_cases: self._lst_test_cases.insert(tk.END, tc)
+                        if prev and prev in self._last_test_cases:
+                            idx = self._last_test_cases.index(prev)
+                            self._lst_test_cases.selection_set(idx)
+            except Exception:
+                pass
+
+            # templates list
+            try:
+                if self._lst_templates:
+                    cur = self._listbox_items(self._lst_templates)
+                    if cur != self._last_templates:
+                        prev = None
+                        sel = self._lst_templates.curselection()
+                        if sel: prev = self._lst_templates.get(sel[0])
+                        self._lst_templates.delete(0, tk.END)
+                        for t in self._last_templates: self._lst_templates.insert(tk.END, t)
+                        if prev and prev in self._last_templates:
+                            idx = self._last_templates.index(prev)
+                            self._lst_templates.selection_set(idx)
             except Exception:
                 pass
 
@@ -812,8 +909,95 @@ class GuiManager:
         return frame
 
     # Blocking editors (Designer calls)
+    def edit_function_blocking(self, initial_name="", initial_sig="", initial_body="", title="Edit Function", snippets=None, placeholders=None) -> Optional[Dict[str, str]]:
+        if not self.ready.is_set() or not self._root: return None
+        result: Dict[str, Optional[Dict[str, str]]] = {"value": None}
+        ev = threading.Event()
+
+        def open_dialog():
+            dlg = tk.Toplevel(self._root); dlg.title(title); dlg.geometry("800x700"); dlg.transient(self._root)
+
+            # Top fields
+            tf = tk.Frame(dlg); tf.pack(fill="x", padx=10, pady=5)
+            tk.Label(tf, text="Name:").grid(row=0, column=0, sticky="w")
+            ent_name = tk.Entry(tf); ent_name.grid(row=0, column=1, sticky="ew", padx=5); ent_name.insert(0, initial_name)
+            tk.Label(tf, text="Signature (args only):").grid(row=1, column=0, sticky="w")
+            ent_sig = tk.Entry(tf); ent_sig.grid(row=1, column=1, sticky="ew", padx=5, pady=5); ent_sig.insert(0, initial_sig)
+            tf.columnconfigure(1, weight=1)
+
+            # Body editor
+            tk.Label(dlg, text="Body (C++):").pack(anchor="w", padx=10)
+            txt_body = scrolledtext.ScrolledText(dlg, font=("Courier", 11), bg="#1e1e1e", fg="#d4d4d4", insertbackground="white")
+            txt_body.pack(fill="both", expand=True, padx=10, pady=5)
+            self._setup_ansi_tags(txt_body)
+            txt_body.insert("1.0", initial_body)
+            self._apply_ansi_highlight(txt_body)
+            txt_body.bind("<KeyRelease>", lambda e: self._apply_ansi_highlight(txt_body))
+
+            # Toolbars
+            tb = tk.Frame(dlg); tb.pack(fill="x", padx=10, pady=5)
+
+            if snippets:
+                sf = tk.LabelFrame(tb, text="Snippets"); sf.pack(side="left", fill="y", padx=5)
+                for n, c in snippets.items():
+                    tk.Button(sf, text=n, font=("Arial", 8), command=lambda code=c: [txt_body.insert(tk.INSERT, code), self._apply_ansi_highlight(txt_body)]).pack(side="left", padx=2)
+
+            if placeholders:
+                pf = tk.LabelFrame(tb, text="Placeholders"); pf.pack(side="left", fill="y", padx=5)
+                for p in placeholders:
+                    tk.Button(pf, text=p, font=("Arial", 8), command=lambda ph=p: [txt_body.insert(tk.INSERT, "{{"+ph+"}}"), self._apply_ansi_highlight(txt_body)]).pack(side="left", padx=2)
+
+            def ok():
+                result["value"] = {
+                    "name": ent_name.get().strip(),
+                    "signature": ent_sig.get().strip(),
+                    "body": txt_body.get("1.0", "end-1c")
+                }
+                dlg.destroy(); ev.set()
+
+            def cancel():
+                dlg.destroy(); ev.set()
+
+            bf = tk.Frame(dlg); bf.pack(fill="x", side="bottom", padx=10, pady=10)
+            tk.Button(bf, text="SAVE", bg="#ccffcc", width=10, command=ok).pack(side="left")
+            tk.Button(bf, text="Cancel", width=10, command=cancel).pack(side="left", padx=10)
+
+            dlg.protocol("WM_DELETE_WINDOW", cancel)
+            dlg.grab_set(); dlg.focus_force()
+
+        self._root.after(0, open_dialog)
+        ev.wait()
+        return result["value"]
+
+    def pick_template_blocking(self, templates: List[str], title="Apply Template") -> Optional[str]:
+        if not self.ready.is_set() or not self._root: return None
+        result = {"value": None}
+        ev = threading.Event()
+
+        def open_dialog():
+            dlg = tk.Toplevel(self._root); dlg.title(title); dlg.geometry("300x400"); dlg.transient(self._root)
+            lb = tk.Listbox(dlg); lb.pack(fill="both", expand=True, padx=10, pady=10)
+            for t in templates: lb.insert(tk.END, t)
+
+            def ok():
+                sel = lb.curselection()
+                if sel: result["value"] = lb.get(sel[0])
+                dlg.destroy(); ev.set()
+
+            def cancel():
+                dlg.destroy(); ev.set()
+
+            btnf = tk.Frame(dlg); btnf.pack(fill="x", padx=10, pady=10)
+            tk.Button(btnf, text="APPLY", command=ok).pack(side="left")
+            tk.Button(btnf, text="Cancel", command=cancel).pack(side="right")
+            dlg.protocol("WM_DELETE_WINDOW", cancel)
+            dlg.grab_set(); dlg.focus_force()
+
+        self._root.after(0, open_dialog)
+        ev.wait()
+        return result["value"]
+
     def edit_text_blocking(self, initial: str = "", title: str = "Edit Text", snippets: Optional[Dict[str, str]] = None) -> Optional[str]:
-        """Open modal multiline text editor on Tk thread; return str or None."""
         if not self.ready.is_set() or not self._root: return initial
         result: Dict[str, Optional[str]] = {"value": None}
         ev = threading.Event()
@@ -1111,7 +1295,8 @@ class ProjectManager:
                 functions.append(UserFunction(
                     name=f.get('name', ''),
                     signature=f.get('signature', ''),
-                    body=f.get('body', '')
+                    body=f.get('body', ''),
+                    test_cases=list(f.get('test_cases', []))
                 ))
 
             if not screens: screens = [Screen("Main")]
@@ -1130,6 +1315,39 @@ class ProjectManager:
             pass
 
 # ------------------------------
+# TemplateManager
+# ------------------------------
+class TemplateManager:
+    FILE = Path(__file__).parent / "templates.json"
+    def __init__(self):
+        self.templates: List[FunctionTemplate] = self.load()
+        if not self.templates:
+            self.templates = self._defaults()
+            self.save()
+
+    def _defaults(self) -> List[FunctionTemplate]:
+        return [
+            FunctionTemplate("Basic Update", "ALL", "const char* msg", "ui.drawText(Layout_{{screen_name}}::{{obj_name}}.x, Layout_{{screen_name}}::{{obj_name}}.y, msg, Layout_{{screen_name}}::{{obj_name}}.color);"),
+            FunctionTemplate("Progress Update", "BOX", "float val", "ui.drawProgressBar(Layout_{{screen_name}}::{{obj_name}}, val, UI_Color::GREEN);"),
+            FunctionTemplate("Sensor Display", "TEXT", "float val", "ui.printfText(Layout_{{screen_name}}::{{obj_name}}, \"%0.2f\", val);"),
+            FunctionTemplate("Toggle Color", "ALL", "UI_Color c", "UI_{{type}} obj = Layout_{{screen_name}}::{{obj_name}};\n    obj.color = c;\n    ui.draw(obj);")
+        ]
+
+    def load(self) -> List[FunctionTemplate]:
+        try:
+            p = Path(self.FILE)
+            if not p.exists(): return []
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return [FunctionTemplate(**d) for d in data]
+        except: return []
+
+    def save(self):
+        try:
+            data = [asdict(t) for t in self.templates]
+            Path(self.FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except: pass
+
+# ------------------------------
 # Designer (curses)
 # ------------------------------
 class Mode(Enum):
@@ -1139,6 +1357,7 @@ class Designer:
     def __init__(self, stdscr, project_file: str):
         self.stdscr = stdscr
         self.pm = ProjectManager(project_file)
+        self.tm = TemplateManager()
         self.project = self.pm.load_project()
         self.act_idx = 0
         self.mode = Mode.NAV
@@ -1146,6 +1365,7 @@ class Designer:
         self.sel_idx = -1
         self.edit_stack: List[MetaObject] = []
         self.group_selection: set[int] = set()
+        self.sel_func_name: Optional[str] = None
         self.temp: Dict[str, int] = {}
         self.gui = GuiManager(update_interval=0.20)
         self.gui.ready.wait(3)
@@ -1260,11 +1480,15 @@ class Designer:
 
     def _update_gui(self):
         try:
+            f_objs = [f for f in self.project.functions if f.name == self.sel_func_name]
+            tc = f_objs[0].test_cases if f_objs else []
             self.gui.update_state(
                 self._get_detailed_help(),
                 [s.name for s in self.project.screens],
                 self.cur_screen.name,
-                [f.name for f in self.project.functions]
+                [f.name for f in self.project.functions],
+                [t.name for t in self.tm.templates],
+                tc
             )
         except Exception:
             pass
@@ -1337,11 +1561,10 @@ class Designer:
                             except Exception: pass
                         self.msg = f"Saved asset '{data}'"
                 elif cmd == "ADD_FUNCTION":
-                    name = self.gui.edit_text_blocking("", title="Function Name")
-                    if name:
-                        sig = self.gui.edit_text_blocking("", title="Signature (args only, e.g. 'float val, int id')")
-                        self.project.functions.append(UserFunction(name=name, signature=sig or ""))
-                        self.msg = f"Added function {name}"
+                    res = self.gui.edit_function_blocking(title="New User Function")
+                    if res:
+                        self.project.functions.append(UserFunction(name=res["name"], signature=res["signature"], body=res["body"]))
+                        self.msg = f"Added function {res['name']}"
                 elif cmd == "EDIT_FUNCTION":
                     target = next((f for f in self.project.functions if f.name == data), None)
                     if target:
@@ -1351,17 +1574,55 @@ class Designer:
                             "Printf": "ui.printfText(Layout_...::..., \"Value: %f\", val);",
                             "Color Swap": "UI_Box b = Layout_...::...;\nb.color = UI_Color::RED;\nui.draw(b);"
                         }
-                        new_body = self.gui.edit_text_blocking(target.body, title=f"Edit {target.name} Body", snippets=snippets)
-                        if new_body is not None:
-                            target.body = new_body
+                        res = self.gui.edit_function_blocking(target.name, target.signature, target.body, title=f"Edit {target.name}", snippets=snippets)
+                        if res:
+                            target.name, target.signature, target.body = res["name"], res["signature"], res["body"]
                             self.msg = f"Updated {target.name}"
+                elif cmd == "ADD_TEMPLATE":
+                    placeholders = ["obj_name", "screen_name", "type"]
+                    res = self.gui.edit_function_blocking(title="New Global Template", placeholders=placeholders)
+                    if res:
+                        self.tm.templates.append(FunctionTemplate(res["name"], "ALL", res["signature"], res["body"]))
+                        self.tm.save(); self.msg = f"Added template {res['name']}"
+                elif cmd == "EDIT_TEMPLATE":
+                    target = next((t for t in self.tm.templates if t.name == data), None)
+                    if target:
+                        placeholders = ["obj_name", "screen_name", "type"]
+                        res = self.gui.edit_function_blocking(target.name, target.signature_pattern, target.body_pattern, title=f"Edit Template: {target.name}", placeholders=placeholders)
+                        if res:
+                            target.name, target.signature_pattern, target.body_pattern = res["name"], res["signature"], res["body"]
+                            self.tm.save(); self.msg = f"Updated template {target.name}"
+                elif cmd == "DELETE_TEMPLATE":
+                    self.tm.templates = [t for t in self.tm.templates if t.name != data]
+                    self.tm.save(); self.msg = f"Deleted template {data}"
+                elif cmd == "SELECT_FUNCTION":
+                    self.sel_func_name = data
                 elif cmd == "DELETE_FUNCTION":
                     self.project.functions = [f for f in self.project.functions if f.name != data]
+                    if self.sel_func_name == data: self.sel_func_name = None
                     self.msg = f"Deleted function {data}"
-                elif cmd == "TEST_FUNCTION":
-                    target = next((f for f in self.project.functions if f.name == data), None)
+                elif cmd == "ADD_TEST_CASE":
+                    target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
                     if target:
-                        call = self.gui.edit_text_blocking(f"{target.name}(ui, )", title="Enter Test Call (C++ statement)")
+                        res = self.gui.edit_text_blocking(f"{target.name}(ui, )", title=f"New Test Case for {target.name}")
+                        if res:
+                            target.test_cases.append(res); self.msg = "Added test case"
+                elif cmd == "EDIT_TEST_CASE":
+                    target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
+                    if target and data in target.test_cases:
+                        idx = target.test_cases.index(data)
+                        res = self.gui.edit_text_blocking(data, title=f"Edit Test Case")
+                        if res:
+                            target.test_cases[idx] = res; self.msg = "Updated test case"
+                elif cmd == "DELETE_TEST_CASE":
+                    target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
+                    if target and data in target.test_cases:
+                        target.test_cases.remove(data); self.msg = "Deleted test case"
+                elif cmd == "TEST_FUNCTION":
+                    fname, tc = data
+                    target = next((f for f in self.project.functions if f.name == fname), None)
+                    if target:
+                        call = tc or self.gui.edit_text_blocking(f"{target.name}(ui, )", title="Enter Test Call")
                         if call:
                             self._run_function_test(call)
                 elif cmd == "COMPILE":
@@ -1563,29 +1824,24 @@ class Designer:
 
     def _generate_function_for_sel(self):
         o = self.cur_objs[self.sel_idx]
-        name = f"update_{o.name}"
-        sig = ""
-        body = ""
-        if isinstance(o, Text):
-            if "temp" in o.name.lower():
-                sig = "float temp"
-                body = f'ui.printfText(Layout_{self.cur_screen.name}::{o.name}, "%0.1f C", temp);'
-            else:
-                sig = "const char* msg"
-                body = f'ui.drawText(Layout_{self.cur_screen.name}::{o.name}.x, Layout_{self.cur_screen.name}::{o.name}.y, msg, Layout_{self.cur_screen.name}::{o.name}.color);'
-        elif isinstance(o, Box):
-            if "progress" in o.name.lower():
-                sig = "float percent"
-                body = f'ui.drawProgressBar(Layout_{self.cur_screen.name}::{o.name}, percent, UI_Color::GREEN);'
-            else:
-                sig = "UI_Color col"
-                body = f"UI_Box b = Layout_{self.cur_screen.name}::{o.name};\n    b.color = col;\n    ui.draw(b);"
-        else:
-            sig = "/* args */"
-            body = f"// TODO: implement update for {o.name}\n    ui.draw(Layout_{self.cur_screen.name}::{o.name});"
+        compatible = [t for t in self.tm.templates if t.target_type == "ALL" or t.target_type == o.type]
+        if not compatible:
+            self.msg = f"No compatible templates for {o.type}"; return
 
-        self.project.functions.append(UserFunction(name=name, signature=sig, body=body))
-        self.msg = f"Generated function {name}"
+        t_name = self.gui.pick_template_blocking([t.name for t in compatible], title=f"Template for {o.name}")
+        if not t_name: return
+
+        tpl = next(t for t in compatible if t.name == t_name)
+
+        def sub(s: str):
+            return s.replace("{{obj_name}}", o.name).replace("{{screen_name}}", self.cur_screen.name).replace("{{type}}", o.type.capitalize())
+
+        fname = f"update_{o.name}"
+        fsig = sub(tpl.signature_pattern)
+        fbody = sub(tpl.body_pattern)
+
+        self.project.functions.append(UserFunction(name=fname, signature=fsig, body=fbody))
+        self.msg = f"Applied template {t_name} -> {fname}"
 
     def _rename_obj(self):
         curses.echo()
