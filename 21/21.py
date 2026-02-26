@@ -20,9 +20,33 @@ from typing import List, Dict, Any, Optional
 SERIAL_UI_HEADER = r"""
 #ifndef SERIAL_UI_H
 #define SERIAL_UI_H
-#include <Arduino.h>
-#include <avr/pgmspace.h>
-#include <stdarg.h>
+
+#ifdef ARDUINO
+  #include <Arduino.h>
+  #include <avr/pgmspace.h>
+#else
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <stdarg.h>
+  #include <stdint.h>
+  #include <string.h>
+  #include <math.h>
+  #define PROGMEM
+  #define pgm_read_ptr(ptr) (*(ptr))
+  #define pgm_read_byte(ptr) (*(const uint8_t*)(ptr))
+
+  class MockSerial {
+  public:
+      void begin(long) {}
+      void print(const char* s) { if(s) printf("%s", s); }
+      void print(int n) { printf("%d", n); }
+      void print(float f) { printf("%f", f); }
+      void write(uint8_t c) { putchar(c); }
+      operator bool() { return true; }
+  };
+  static MockSerial Serial;
+  inline void delay(int ms) {}
+#endif
 
 enum class UI_Color {
     BLACK=30, RED=31, GREEN=32, YELLOW=33, BLUE=34, MAGENTA=35, CYAN=36, WHITE=37,
@@ -248,9 +272,20 @@ class Freehand(UIElement):
         return f'{{ {self.x}, {self.y}, RES_{self.name}_ARR, {len(self.lines)}, UI_Color::{self.color.name} }}'
 
 @dataclass
+class UserFunction:
+    name: str
+    signature: str = ""
+    body: str = ""
+
+@dataclass
 class Screen:
     name: str
     objects: List[UIElement] = field(default_factory=list)
+
+@dataclass
+class Project:
+    screens: List[Screen] = field(default_factory=list)
+    functions: List[UserFunction] = field(default_factory=list)
 
 # ------------------------------
 # GuiManager (Tk in background thread)
@@ -269,13 +304,16 @@ class GuiManager:
         self._root: Optional[tk.Tk] = None
         self._lst_screens: Optional[tk.Listbox] = None
         self._lst_assets: Optional[tk.Listbox] = None
+        self._lst_functions: Optional[tk.Listbox] = None
         self._help_text_widget: Optional[scrolledtext.ScrolledText] = None
+        self._visual_out: Optional[scrolledtext.ScrolledText] = None
         self.ready = threading.Event()
         self._lock = threading.Lock()
         self._last_update = 0.0
         self._last_screens: List[str] = []
         self._last_help: str = ""
         self._last_active: str = ""
+        self._last_functions: List[str] = []
         self._update_interval = update_interval
         # start thread
         self._thr = threading.Thread(target=self._run_tk, daemon=True)
@@ -286,7 +324,7 @@ class GuiManager:
             root = tk.Tk()
             self._root = root
             root.title("UI Helper")
-            root.geometry("460x540")
+            root.geometry("520x640")
             try:
                 root.attributes('-topmost', True)
             except Exception:
@@ -319,6 +357,27 @@ class GuiManager:
             af = tk.Frame(f_assets); af.pack(fill="x", pady=4)
             tk.Button(af, text="Insert Selected", bg="#ddffdd", command=lambda: self._emit("INSERT_ASSET")).pack(side="left", padx=6)
             tk.Button(af, text="Delete Asset", command=self._delete_asset).pack(side="right", padx=6)
+
+            # Function Lab
+            f_lab = tk.Frame(nb)
+            nb.add(f_lab, text="Function Lab")
+
+            f_lab_top = tk.Frame(f_lab)
+            f_lab_top.pack(fill="x", padx=6, pady=6)
+            tk.Label(f_lab_top, text="User Functions:").pack(side="top", anchor="w")
+            self._lst_functions = tk.Listbox(f_lab_top, height=5, exportselection=False)
+            self._lst_functions.pack(fill="x", pady=2)
+
+            lf = tk.Frame(f_lab_top); lf.pack(fill="x")
+            tk.Button(lf, text="New", command=lambda: self._emit("ADD_FUNCTION")).pack(side="left", padx=2)
+            tk.Button(lf, text="Edit", command=lambda: self._emit("EDIT_FUNCTION")).pack(side="left", padx=2)
+            tk.Button(lf, text="Delete", command=lambda: self._emit("DELETE_FUNCTION")).pack(side="left", padx=2)
+            tk.Button(lf, text="TEST/RUN", bg="#ccffcc", command=lambda: self._emit("TEST_FUNCTION")).pack(side="right", padx=2)
+
+            tk.Label(f_lab, text="Visual Output:").pack(padx=6, anchor="w")
+            self._visual_out = scrolledtext.ScrolledText(f_lab, font=("Courier", 10), bg="#1e1e1e", fg="#ffffff", height=15)
+            self._visual_out.pack(fill="both", expand=True, padx=6, pady=6)
+            self._setup_ansi_tags(self._visual_out)
 
             # Bottom buttons
             bf2 = tk.Frame(root); bf2.pack(fill="x", side="bottom", padx=6, pady=6)
@@ -363,10 +422,16 @@ class GuiManager:
                 data = self._lst_assets.get(sel[0])
             elif cmd == "SAVE_ASSET":
                 data = simpledialog.askstring("Save Asset", "Name for this asset:", parent=self._root)
+            elif cmd in ("EDIT_FUNCTION", "DELETE_FUNCTION", "TEST_FUNCTION"):
+                sel = self._lst_functions.curselection()
+                if not sel: return
+                data = self._lst_functions.get(sel[0])
+            elif cmd == "ADD_FUNCTION":
+                data = True
         except Exception:
             data = None
         # only push meaningful commands
-        if data is not None or cmd == "SAVE_ASSET":
+        if data is not None or cmd in ("SAVE_ASSET", "COMPILE"):
             try:
                 self.queue.put((cmd, data))
             except Exception:
@@ -431,7 +496,7 @@ class GuiManager:
             pass
 
     # Public API: update_state called by Designer
-    def update_state(self, help_text: str, screens: List[str], active_screen: str):
+    def update_state(self, help_text: str, screens: List[str], active_screen: str, functions: List[str] = []):
         """
         Non-blocking: schedules a safe GUI update on Tk thread, rate-limited.
         Designer can call frequently; updates will be applied at most once per self._update_interval.
@@ -442,6 +507,7 @@ class GuiManager:
             self._last_help = help_text
             self._last_screens = list(screens)
             self._last_active = active_screen
+            self._last_functions = list(functions)
             # if enough time passed, schedule an immediate update
             if now - self._last_update >= self._update_interval:
                 self._last_update = now
@@ -459,6 +525,16 @@ class GuiManager:
                         self._last_update = now + (delay / 1000.0)
                     except Exception:
                         pass
+
+    def display_test_output(self, text: str):
+        if self._root and self._visual_out:
+            def update():
+                self._visual_out.configure(state="normal")
+                self._visual_out.delete("1.0", tk.END)
+                self._visual_out.insert("1.0", text)
+                self._apply_ansi_highlight(self._visual_out)
+                self._visual_out.configure(state="disabled")
+            self._root.after(0, update)
 
     def _apply_update(self):
         """Runs on Tk thread; apply the last requested state in a non-destructive, focus-aware way."""
@@ -521,6 +597,22 @@ class GuiManager:
             # assets list refresh (it preserves selection internally)
             try:
                 self._refresh_assets()
+            except Exception:
+                pass
+
+            # functions list
+            try:
+                if self._lst_functions:
+                    cur = self._listbox_items(self._lst_functions)
+                    if cur != self._last_functions:
+                        prev = None
+                        sel = self._lst_functions.curselection()
+                        if sel: prev = self._lst_functions.get(sel[0])
+                        self._lst_functions.delete(0, tk.END)
+                        for f in self._last_functions: self._lst_functions.insert(tk.END, f)
+                        if prev and prev in self._last_functions:
+                            idx = self._last_functions.index(prev)
+                            self._lst_functions.selection_set(idx)
             except Exception:
                 pass
 
@@ -890,17 +982,22 @@ class ProjectManager:
                 res.append(no)
         return res
 
-    def save_project(self, screens: List[Screen]):
+    def save_project(self, project: Project):
         self.ensure_lib()
         try:
             h = ['#ifndef UI_LAYOUT_H', '#define UI_LAYOUT_H', '#include "SerialUI.h"', '']
-            all_flat = {s.name: self._flatten(s.objects) for s in screens}
+            all_flat = {s.name: self._flatten(s.objects) for s in project.screens}
             for s_name, objs in all_flat.items():
                 h.append(f'struct Layout_{s_name} {{')
                 for o in objs:
                     h.append(f'    static const UI_{o.type.capitalize()} {o.name};')
                 h.append('};'); h.append(f'void drawScreen_{s_name}(SerialUI& ui);'); h.append('')
-            h.append('#endif')
+
+            h.append('// USER FUNCTIONS')
+            for f in project.functions:
+                h.append(f'void {f.name}(SerialUI& ui{", " + f.signature if f.signature else ""});')
+
+            h.append('\n#endif')
             Path(self.H_FILE).write_text("\n".join(h), encoding="utf-8")
 
             cpp = ['#include "ui_layout.h"', '', '// RESOURCES']
@@ -921,30 +1018,58 @@ class ProjectManager:
                 for o in objs:
                     cpp.append(f'    ui.draw(Layout_{s_name}::{o.name});')
                 cpp.append('}\n')
+
+            cpp.append('// USER FUNCTIONS IMPLEMENTATION')
+            for f in project.functions:
+                cpp.append(f'void {f.name}(SerialUI& ui{", " + f.signature if f.signature else ""}) {{')
+                cpp.append(f'    {f.body}')
+                cpp.append('}\n')
+
             Path(self.CPP_FILE).write_text("\n".join(cpp), encoding="utf-8")
         except Exception as e: raise
 
-    def load_project(self) -> List[Screen]:
+    def load_project(self) -> Project:
         try:
             p = Path(self.project_file)
-            if not p.exists(): return [Screen("Main")]
+            if not p.exists(): return Project([Screen("Main")], [])
             txt = p.read_text(encoding="utf-8")
             data = json.loads(txt) if txt else []
+
+            if isinstance(data, list):
+                screens_data = data
+                functions_data = []
+            else:
+                screens_data = data.get('screens', [])
+                functions_data = data.get('functions', [])
+
             screens: List[Screen] = []
-            for s in data:
+            for s in screens_data:
                 scr = Screen(s.get('name', 'Main'))
                 for o in s.get('objects', []):
                     elem = UIElement.from_dict(o)
                     if elem:
                         scr.objects.append(elem)
                 screens.append(scr)
-            return screens if screens else [Screen("Main")]
-        except Exception:
-            return [Screen("Main")]
 
-    def save_json_state(self, screens: List[Screen]):
+            functions: List[UserFunction] = []
+            for f in functions_data:
+                functions.append(UserFunction(
+                    name=f.get('name', ''),
+                    signature=f.get('signature', ''),
+                    body=f.get('body', '')
+                ))
+
+            if not screens: screens = [Screen("Main")]
+            return Project(screens, functions)
+        except Exception:
+            return Project([Screen("Main")], [])
+
+    def save_json_state(self, project: Project):
         try:
-            data = [{'name': s.name, 'objects': [o.to_dict() for o in s.objects]} for s in screens]
+            data = {
+                'screens': [{'name': s.name, 'objects': [o.to_dict() for o in s.objects]} for s in project.screens],
+                'functions': [asdict(f) for f in project.functions]
+            }
             Path(self.project_file).write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception:
             pass
@@ -959,7 +1084,7 @@ class Designer:
     def __init__(self, stdscr, project_file: str):
         self.stdscr = stdscr
         self.pm = ProjectManager(project_file)
-        self.screens = self.pm.load_project()
+        self.project = self.pm.load_project()
         self.act_idx = 0
         self.mode = Mode.NAV
         self.cx = 5; self.cy = 5
@@ -970,15 +1095,15 @@ class Designer:
         self.gui = GuiManager(update_interval=0.20)
         self.gui.ready.wait(3)
         self.msg = "Welcome."
-        if not self.screens:
-            self.screens = [Screen("Main")]
+        if not self.project.screens:
+            self.project.screens = [Screen("Main")]
 
     @property
     def cur_screen(self) -> Screen:
-        if 0 <= self.act_idx < len(self.screens):
-            return self.screens[self.act_idx]
+        if 0 <= self.act_idx < len(self.project.screens):
+            return self.project.screens[self.act_idx]
         self.act_idx = 0
-        return self.screens[0]
+        return self.project.screens[0]
 
     @property
     def cur_objs(self) -> List[UIElement]:
@@ -1035,9 +1160,51 @@ class Designer:
             h.append("Esc: Exit to parent")
         return "\n".join(h)
 
+    def _run_function_test(self, call_string: str):
+        self.msg = "Compiling and Running test..."
+        self._update_gui()
+        try:
+            # 1. Save state
+            self.pm.save_project(self.project)
+            self.pm.save_json_state(self.project)
+
+            # 2. Generate test runner
+            test_cpp = [
+                '#include "ui_layout.h"',
+                'int main() {',
+                '    SerialUI ui;',
+                '    ui.begin();',
+                f'    {call_string};',
+                '    return 0;',
+                '}'
+            ]
+            Path("test_runner.cpp").write_text("\n".join(test_cpp), encoding="utf-8")
+
+            # 3. Compile
+            import subprocess
+            cmd = ["g++", "test_runner.cpp", "ui_layout.cpp", "-o", "test_runner"]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+                self.gui.display_test_output(f"COMPILATION ERROR:\n{res.stderr}")
+                self.msg = "Test failed (compile error)"
+                return
+
+            # 4. Run
+            res = subprocess.run(["./test_runner"], capture_output=True, text=True)
+            self.gui.display_test_output(res.stdout + "\n" + res.stderr)
+            self.msg = "Test completed"
+
+        except Exception as e:
+            self.msg = f"Test system error: {e}"
+
     def _update_gui(self):
         try:
-            self.gui.update_state(self._get_detailed_help(), [s.name for s in self.screens], self.cur_screen.name)
+            self.gui.update_state(
+                self._get_detailed_help(),
+                [s.name for s in self.project.screens],
+                self.cur_screen.name,
+                [f.name for f in self.project.functions]
+            )
         except Exception:
             pass
 
@@ -1086,18 +1253,18 @@ class Designer:
             while True:
                 cmd, data = self.gui.queue.get_nowait()
                 if cmd == "SWITCH_SCREEN":
-                    for i, s in enumerate(self.screens):
+                    for i, s in enumerate(self.project.screens):
                         if s.name == data:
                             self.act_idx = i; self.sel_idx = -1; self.msg = f"Switched to {s.name}"
                 elif cmd == "ADD_SCREEN":
                     if data:
                         safe = re.sub(r'[^a-zA-Z0-9_]', '', data) or "Screen"
-                        self.screens.append(Screen(safe)); self.act_idx = len(self.screens)-1; self.sel_idx = -1; self.msg = f"Added {safe}"
+                        self.project.screens.append(Screen(safe)); self.act_idx = len(self.project.screens)-1; self.sel_idx = -1; self.msg = f"Added {safe}"
                 elif cmd == "RENAME_SCREEN":
                     if data:
                         old, new = data
                         safe = re.sub(r'[^a-zA-Z0-9_]', '', new) or old
-                        for s in self.screens:
+                        for s in self.project.screens:
                             if s.name == old:
                                 s.name = safe; self.msg = f"Renamed {old}->{safe}"
                 elif cmd == "SAVE_ASSET":
@@ -1108,9 +1275,31 @@ class Designer:
                             try: self.gui._root.after(0, self.gui._refresh_assets)
                             except Exception: pass
                         self.msg = f"Saved asset '{data}'"
+                elif cmd == "ADD_FUNCTION":
+                    name = self.gui.edit_text_blocking("", title="Function Name")
+                    if name:
+                        sig = self.gui.edit_text_blocking("", title="Signature (args only, e.g. 'float val, int id')")
+                        self.project.functions.append(UserFunction(name=name, signature=sig or ""))
+                        self.msg = f"Added function {name}"
+                elif cmd == "EDIT_FUNCTION":
+                    target = next((f for f in self.project.functions if f.name == data), None)
+                    if target:
+                        new_body = self.gui.edit_text_blocking(target.body, title=f"Edit {target.name} Body")
+                        if new_body is not None:
+                            target.body = new_body
+                            self.msg = f"Updated {target.name}"
+                elif cmd == "DELETE_FUNCTION":
+                    self.project.functions = [f for f in self.project.functions if f.name != data]
+                    self.msg = f"Deleted function {data}"
+                elif cmd == "TEST_FUNCTION":
+                    target = next((f for f in self.project.functions if f.name == data), None)
+                    if target:
+                        call = self.gui.edit_text_blocking(f"{target.name}(ui, )", title="Enter Test Call (C++ statement)")
+                        if call:
+                            self._run_function_test(call)
                 elif cmd == "COMPILE":
                     try:
-                        self.pm.save_project(self.screens); self.pm.save_json_state(self.screens)
+                        self.pm.save_project(self.project); self.pm.save_json_state(self.project)
                         self.msg = "Project COMPILED and Saved"
                     except Exception as e:
                         self.msg = f"Compile error: {e}"
@@ -1174,7 +1363,7 @@ class Designer:
             if k == ord('q'): return False
             if k == ord('s'):
                 try:
-                    self.pm.save_project(self.screens); self.pm.save_json_state(self.screens); self.msg = "Saved project"
+                    self.pm.save_project(self.project); self.pm.save_json_state(self.project); self.msg = "Saved project"
                 except Exception as e:
                     self.msg = f"Save failed: {e}"
                 return True
@@ -1201,6 +1390,8 @@ class Designer:
                 o.color = cl[(idx + 1) % len(cl)]; self.msg = "Color changed"
             if k == ord('n') and self._valid_sel():
                 self._rename_obj()
+            if k == ord('f') and self._valid_sel():
+                self._generate_function_for_sel()
             if k == ord('e') and self._valid_sel():
                 target = self.cur_objs[self.sel_idx]
                 try:
@@ -1302,6 +1493,24 @@ class Designer:
         name = f"txt_{len(self.cur_objs)}"
         new = Text(name=name, color=Color.WHITE, x=self.cx, y=self.cy, content=str(txt), layer=len(self.cur_objs))
         self.cur_objs.append(new); self.sel_idx = len(self.cur_objs) - 1; self.msg = f"Added {name}"
+
+    def _generate_function_for_sel(self):
+        o = self.cur_objs[self.sel_idx]
+        name = f"update_{o.name}"
+        sig = ""
+        body = ""
+        if isinstance(o, Text):
+            sig = "float val"
+            body = f'ui.printfText(Layout_{self.cur_screen.name}::{o.name}, "%0.1f", val);'
+        elif isinstance(o, Box):
+            sig = "UI_Color col"
+            body = f"UI_Box b = Layout_{self.cur_screen.name}::{o.name};\n    b.color = col;\n    ui.draw(b);"
+        else:
+            sig = "/* args */"
+            body = f"// TODO: implement update for {o.name}\n    ui.draw(Layout_{self.cur_screen.name}::{o.name});"
+
+        self.project.functions.append(UserFunction(name=name, signature=sig, body=body))
+        self.msg = f"Generated function {name}"
 
     def _rename_obj(self):
         curses.echo()
@@ -1459,7 +1668,7 @@ def main():
     if compile_only:
         pm = ProjectManager(project_file)
         try:
-            scrs = pm.load_project(); pm.save_project(scrs)
+            proj = pm.load_project(); pm.save_project(proj)
             print(f"Compiled {project_file} to C++.")
         except Exception as e: print(f"Failed: {e}")
         return

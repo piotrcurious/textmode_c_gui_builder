@@ -1,60 +1,112 @@
-[
-  {
-    "name": "Main",
-    "objects": [
-      {
-        "name": "box_0",
-        "color": "WHITE",
-        "type": "BOX",
-        "layer": 0,
-        "x": 3,
-        "y": 2,
-        "w": 18,
-        "h": 4
-      },
-      {
-        "name": "box_1",
-        "color": "RED",
-        "type": "BOX",
-        "layer": 1,
-        "x": 6,
-        "y": 4,
-        "w": 27,
-        "h": 4
-      },
-      {
-        "name": "temperature_float_C",
-        "color": "WHITE",
-        "type": "TEXT",
-        "layer": 2,
-        "x": 17,
-        "y": 6,
-        "content": "%f.3"
-      }
-    ]
-  },
-  {
-    "name": "settings",
-    "objects": [
-      {
-        "name": "red_box",
-        "color": "RED",
-        "type": "BOX",
-        "layer": 1,
-        "x": 4,
-        "y": 2,
-        "w": 35,
-        "h": 8
-      },
-      {
-        "name": "txt_1",
-        "color": "BLUE",
-        "type": "TEXT",
-        "layer": 1,
-        "x": 17,
-        "y": 5,
-        "content": "<--OH-->\n<--AH-->"
-      }
-    ]
-  }
-]
+{
+  "screens": [
+    {
+      "name": "Main",
+      "objects": [
+        {
+          "name": "box_0",
+          "color": "WHITE",
+          "type": "BOX",
+          "layer": 0,
+          "x": 3,
+          "y": 2,
+          "w": 18,
+          "h": 4
+        },
+        {
+          "name": "box_1",
+          "color": "RED",
+          "type": "BOX",
+          "layer": 1,
+          "x": 6,
+          "y": 4,
+          "w": 27,
+          "h": 4
+        },
+        {
+          "name": "temperature_float_C",
+          "color": "WHITE",
+          "type": "TEXT",
+          "layer": 2,
+          "x": 17,
+          "y": 6,
+          "content": "%0.1f C"
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "objects": [
+        {
+          "name": "header_box",
+          "color": "BLUE",
+          "type": "BOX",
+          "layer": 0,
+          "x": 0,
+          "y": 0,
+          "w": 60,
+          "h": 3
+        },
+        {
+          "name": "title",
+          "color": "WHITE",
+          "type": "TEXT",
+          "layer": 1,
+          "x": 20,
+          "y": 1,
+          "content": "SYSTEM DASHBOARD"
+        },
+        {
+          "name": "status_label",
+          "color": "CYAN",
+          "type": "TEXT",
+          "layer": 2,
+          "x": 2,
+          "y": 5,
+          "content": "Status:"
+        },
+        {
+          "name": "status_val",
+          "color": "GREEN",
+          "type": "TEXT",
+          "layer": 3,
+          "x": 10,
+          "y": 5,
+          "content": "ONLINE"
+        },
+        {
+          "name": "progress_bg",
+          "color": "WHITE",
+          "type": "BOX",
+          "layer": 4,
+          "x": 2,
+          "y": 8,
+          "w": 22,
+          "h": 3
+        },
+        {
+          "name": "progress_fill",
+          "color": "MAGENTA",
+          "type": "LINE",
+          "layer": 5,
+          "x1": 3,
+          "y1": 9,
+          "x2": 3,
+          "y2": 9
+        }
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "update_temp",
+      "signature": "float t",
+      "body": "ui.printfText(Layout_Main::temperature_float_C, \"%0.1f C\", t);"
+    },
+    {
+      "name": "set_online",
+      "signature": "bool online",
+      "body": "if (online) {\n        ui.drawText(Layout_Dashboard::status_val.x, Layout_Dashboard::status_val.y, \"ONLINE \", UI_Color::GREEN);\n    } else {\n        ui.drawText(Layout_Dashboard::status_val.x, Layout_Dashboard::status_val.y, \"OFFLINE\", UI_Color::RED);\n    }"
+    }
+  ]
+}
