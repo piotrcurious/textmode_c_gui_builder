@@ -42,8 +42,13 @@ SERIAL_UI_HEADER = r"""
   public:
       void begin(long) {}
       void print(const char* s) { if(s) printf("%s", s); }
-      void print(int n) { printf("%d", n); }
+      void print(int n, int base = 10) { printf(base == 16 ? "%x" : "%d", n); }
+      void print(unsigned int n, int base = 10) { printf(base == 16 ? "%x" : "%u", n); }
+      void print(long n, int base = 10) { printf(base == 16 ? "%lx" : "%ld", n); }
+      void print(unsigned long n, int base = 10) { printf(base == 16 ? "%lx" : "%lu", n); }
       void print(float f) { printf("%f", f); }
+      void println(const char* s = "") { printf("%s\n", s); }
+      void println(int n, int base = 10) { print(n, base); printf("\n"); }
       void write(uint8_t c) { putchar(c); }
       operator bool() { return true; }
   };
@@ -322,6 +327,54 @@ class FunctionTemplate:
     target_type: str = "ALL" # BOX, TEXT, LINE, FREEHAND, META, ALL
     signature_pattern: str = ""
     body_pattern: str = ""
+
+class AnsiRenderer:
+    def __init__(self, w=80, h=24):
+        self.w, self.h = w, h
+        self.grid = [[' ' for _ in range(w)] for _ in range(h)]
+        self.colors = [[(15, None, False) for _ in range(w)] for _ in range(h)] # (fg, bg, bold)
+        self.cx, self.cy = 0, 0
+        self.fg, self.bg, self.bold = 15, None, False
+
+    def feed(self, data: str):
+        i = 0
+        while i < len(data):
+            if data[i] == '\x1b' and i + 1 < len(data) and data[i+1] == '[':
+                j = i + 2
+                while j < len(data) and not ('a' <= data[j] <= 'z' or 'A' <= data[j] <= 'Z'):
+                    j += 1
+                if j < len(data):
+                    seq = data[i+2:j]
+                    code = data[j]
+                    if code == 'H': # Position
+                        parts = seq.split(';')
+                        self.cy = max(0, min(self.h-1, int(parts[0])-1 if parts[0] else 0))
+                        self.cx = max(0, min(self.w-1, int(parts[1])-1 if len(parts) > 1 and parts[1] else 0))
+                    elif code == 'J' and seq == '2': # Clear
+                        self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
+                        self.colors = [[(15, None, False) for _ in range(self.w)] for _ in range(self.h)]
+                        self.cx = self.cy = 0
+                    elif code == 'm': # Color
+                        for c in seq.split(';'):
+                            if not c or c == '0': self.fg, self.bg, self.bold = 15, None, False
+                            elif c == '1': self.bold = True
+                            elif "30" <= c <= "37": self.fg = int(c) - 30
+                            elif "90" <= c <= "97": self.fg = int(c) - 90 + 8
+                            elif "40" <= c <= "47": self.bg = int(c) - 40
+                            elif "100" <= c <= "107": self.bg = int(c) - 100 + 8
+                    i = j + 1
+                    continue
+            if data[i] == '\n':
+                self.cy = min(self.h-1, self.cy + 1)
+                self.cx = 0
+            elif data[i] == '\r':
+                self.cx = 0
+            else:
+                if 0 <= self.cy < self.h and 0 <= self.cx < self.w:
+                    self.grid[self.cy][self.cx] = data[i]
+                    self.colors[self.cy][self.cx] = (self.fg, self.bg, self.bold)
+                    self.cx += 1
+            i += 1
 
 @dataclass
 class Screen:
@@ -624,11 +677,31 @@ class GuiManager:
 
     def display_test_output(self, text: str):
         if self._root and self._visual_out:
+            renderer = AnsiRenderer(80, 24)
+            renderer.feed(text)
+
             def update():
                 self._visual_out.configure(state="normal")
                 self._visual_out.delete("1.0", tk.END)
-                self._visual_out.insert("1.0", text)
-                self._apply_ansi_highlight(self._visual_out)
+
+                for y in range(renderer.h):
+                    line_text = "".join(renderer.grid[y])
+                    self._visual_out.insert(tk.END, line_text + "\n")
+
+                    line_idx = y + 1
+                    x = 0
+                    while x < renderer.w:
+                        fg, bg, bold = renderer.colors[y][x]
+                        start_x = x
+                        while x < renderer.w and renderer.colors[y][x] == (fg, bg, bold):
+                            x += 1
+
+                        pos = f"{line_idx}.{start_x}"
+                        end = f"{line_idx}.{x}"
+                        self._visual_out.tag_add(f"ansi_fg_{fg}", pos, end)
+                        if bg is not None: self._visual_out.tag_add(f"ansi_bg_{bg}", pos, end)
+                        if bold: self._visual_out.tag_add("ansi_bold", pos, end)
+
                 self._visual_out.configure(state="disabled")
             self._root.after(0, update)
 

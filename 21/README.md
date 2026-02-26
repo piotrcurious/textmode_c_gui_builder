@@ -13,6 +13,7 @@ A powerful, hybrid terminal/GUI tool for designing text-based user interfaces fo
 - **Function Lab**: Generate, edit, and test C++ functions that interact with your UI.
 - **Template Library**: Manage global function blueprints with placeholders (`{{obj_name}}`, `{{screen_name}}`) to quickly generate consistent logic for UI elements.
 - **Advanced Testing System**: A specialized Test Case Editor allows you to save multiple scenarios for each function. Use the **SAVE & RUN** feature to immediately see results in the integrated simulation.
+- **True Terminal Simulation**: The Function Lab features a grid-based ANSI renderer that accurately simulates absolute cursor positioning and colors on an 80x24 terminal.
 
 ## Quick Start
 
