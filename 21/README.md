@@ -10,9 +10,9 @@ A powerful, hybrid terminal/GUI tool for designing text-based user interfaces fo
 - **Meta-Objects**: Hierarchical grouping of elements for reusable components.
 - **Layering**: Adjust the drawing order of objects.
 - **Asset Library**: Save and reuse UI components across projects.
-- **Function Lab**: Generate, edit, and test C++ functions that interact with your UI, all within the designer using a built-in mock environment and compiler.
+- **Function Lab**: Generate, edit, and test C++ functions that interact with your UI.
 - **Template Library**: Manage global function blueprints with placeholders (`{{obj_name}}`, `{{screen_name}}`) to quickly generate consistent logic for UI elements.
-- **Persistent Test Cases**: Save and quickly run multiple test scenarios for each of your functions to verify behavior under different conditions.
+- **Advanced Testing System**: A specialized Test Case Editor allows you to save multiple scenarios for each function. Use the **SAVE & RUN** feature to immediately see results in the integrated simulation.
 
 ## Quick Start
 

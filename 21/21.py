@@ -29,6 +29,7 @@ SERIAL_UI_HEADER = r"""
   #include <stdio.h>
   #include <chrono>
   #include <stdlib.h>
+  #include <algorithm>
   #include <stdarg.h>
   #include <stdint.h>
   #include <string.h>
@@ -430,9 +431,10 @@ class GuiManager:
 
             tcf = tk.Frame(f_tc); tcf.pack(fill="x")
             tk.Button(tcf, text="+ Case", command=lambda: self._emit("ADD_TEST_CASE")).pack(side="left", padx=2)
-            tk.Button(tcf, text="Edit Case", command=lambda: self._emit("EDIT_TEST_CASE")).pack(side="left", padx=2)
-            tk.Button(tcf, text="- Case", command=lambda: self._emit("DELETE_TEST_CASE")).pack(side="left", padx=2)
-            tk.Button(tcf, text="TEST/RUN", bg="#ccffcc", font=("Arial", 10, "bold"), command=lambda: self._emit("TEST_FUNCTION")).pack(side="right", padx=2)
+            tk.Button(tcf, text="Edit", command=lambda: self._emit("EDIT_TEST_CASE")).pack(side="left", padx=2)
+            tk.Button(tcf, text="Clone", command=lambda: self._emit("CLONE_TEST_CASE")).pack(side="left", padx=2)
+            tk.Button(tcf, text="Delete", command=lambda: self._emit("DELETE_TEST_CASE")).pack(side="left", padx=2)
+            tk.Button(tcf, text="RUN SELECTED CASE", bg="#ccffcc", font=("Arial", 10, "bold"), command=lambda: self._emit("TEST_FUNCTION")).pack(side="right", padx=2)
 
             # Template Library tab
             f_temp = tk.Frame(nb)
@@ -508,7 +510,7 @@ class GuiManager:
                 sel_tc = self._lst_test_cases.curselection()
                 tc = self._lst_test_cases.get(sel_tc[0]) if sel_tc else None
                 data = (fname, tc)
-            elif cmd in ("EDIT_TEST_CASE", "DELETE_TEST_CASE"):
+            elif cmd in ("EDIT_TEST_CASE", "CLONE_TEST_CASE", "DELETE_TEST_CASE"):
                 sel = self._lst_test_cases.curselection()
                 if not sel: return
                 data = self._lst_test_cases.get(sel[0])
@@ -968,6 +970,48 @@ class GuiManager:
         self._root.after(0, open_dialog)
         ev.wait()
         return result["value"]
+
+    def edit_test_case_blocking(self, func_name, signature, initial_val="", title="Edit Test Case") -> Optional[Dict[str, Any]]:
+        if not self.ready.is_set() or not self._root: return None
+        result: Dict[str, Any] = {"value": None, "run": False}
+        ev = threading.Event()
+
+        def open_dialog():
+            dlg = tk.Toplevel(self._root); dlg.title(title); dlg.geometry("600x400"); dlg.transient(self._root)
+
+            tk.Label(dlg, text=f"Testing Function: {func_name}", font=("Arial", 10, "bold")).pack(pady=5)
+            tk.Label(dlg, text=f"Signature: void {func_name}(SerialUI& ui, {signature})", font=("Courier", 9), fg="#555").pack()
+
+            tk.Label(dlg, text="Test Call (C++ statement):").pack(anchor="w", padx=10, pady=(10, 0))
+            txt = scrolledtext.ScrolledText(dlg, font=("Courier", 11), height=8)
+            txt.pack(fill="x", padx=10, pady=5)
+            txt.insert("1.0", initial_val or f"{func_name}(ui, );")
+
+            def insert_template():
+                # Simple heuristic to extract arg count/types?
+                # For now just provide the function call
+                txt.delete("1.0", tk.END)
+                txt.insert("1.0", f"{func_name}(ui, );")
+                txt.mark_set(tk.INSERT, f"1.{len(func_name)+5}")
+
+            tk.Button(dlg, text="Generate Template Call", command=insert_template).pack(anchor="e", padx=10)
+
+            def save(run=False):
+                result["value"] = txt.get("1.0", "end-1c").strip()
+                result["run"] = run
+                dlg.destroy(); ev.set()
+
+            bf = tk.Frame(dlg); bf.pack(fill="x", side="bottom", padx=10, pady=10)
+            tk.Button(bf, text="SAVE", bg="#ccffcc", width=12, command=lambda: save(False)).pack(side="left")
+            tk.Button(bf, text="SAVE & RUN", bg="#aaddff", width=12, command=lambda: save(True)).pack(side="left", padx=10)
+            tk.Button(bf, text="Cancel", width=10, command=lambda: [dlg.destroy(), ev.set()]).pack(side="right")
+
+            dlg.protocol("WM_DELETE_WINDOW", lambda: [dlg.destroy(), ev.set()])
+            dlg.grab_set(); dlg.focus_force()
+
+        self._root.after(0, open_dialog)
+        ev.wait()
+        return result if result["value"] else None
 
     def pick_template_blocking(self, templates: List[str], title="Apply Template") -> Optional[str]:
         if not self.ready.is_set() or not self._root: return None
@@ -1604,16 +1648,25 @@ class Designer:
                 elif cmd == "ADD_TEST_CASE":
                     target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
                     if target:
-                        res = self.gui.edit_text_blocking(f"{target.name}(ui, )", title=f"New Test Case for {target.name}")
+                        res = self.gui.edit_test_case_blocking(target.name, target.signature)
                         if res:
-                            target.test_cases.append(res); self.msg = "Added test case"
+                            target.test_cases.append(res["value"])
+                            self.msg = "Added test case"
+                            if res["run"]: self._run_function_test(res["value"])
                 elif cmd == "EDIT_TEST_CASE":
                     target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
                     if target and data in target.test_cases:
                         idx = target.test_cases.index(data)
-                        res = self.gui.edit_text_blocking(data, title=f"Edit Test Case")
+                        res = self.gui.edit_test_case_blocking(target.name, target.signature, initial_val=data)
                         if res:
-                            target.test_cases[idx] = res; self.msg = "Updated test case"
+                            target.test_cases[idx] = res["value"]
+                            self.msg = "Updated test case"
+                            if res["run"]: self._run_function_test(res["value"])
+                elif cmd == "CLONE_TEST_CASE":
+                    target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
+                    if target and data in target.test_cases:
+                        target.test_cases.append(data)
+                        self.msg = "Cloned test case"
                 elif cmd == "DELETE_TEST_CASE":
                     target = next((f for f in self.project.functions if f.name == self.sel_func_name), None)
                     if target and data in target.test_cases:
@@ -1840,7 +1893,21 @@ class Designer:
         fsig = sub(tpl.signature_pattern)
         fbody = sub(tpl.body_pattern)
 
-        self.project.functions.append(UserFunction(name=fname, signature=fsig, body=fbody))
+        # Heuristic for test case:
+        # try to provide some default values for common types
+        tc_args = fsig
+        tc_args = tc_args.replace("float ", "").replace("int ", "").replace("bool ", "").replace("UI_Color ", "").replace("const char* ", "")
+        # This is very crude but better than nothing.
+        # Most of our templates use single args for now.
+
+        new_func = UserFunction(name=fname, signature=fsig, body=fbody)
+        if fsig:
+            # Add a placeholder test case
+            new_func.test_cases.append(f"{fname}(ui, /* TODO: args */);")
+        else:
+            new_func.test_cases.append(f"{fname}(ui);")
+
+        self.project.functions.append(new_func)
         self.msg = f"Applied template {t_name} -> {fname}"
 
     def _rename_obj(self):
