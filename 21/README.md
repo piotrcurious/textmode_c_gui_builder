@@ -94,5 +94,40 @@ Use the ANSI toolbar in the Text editor to create colored status icons (e.g., a 
 
 The generated `SerialUI.h` includes a mock environment. You can compile your UI and functions on a PC using `g++` to verify logic before uploading to hardware. The **Function Lab** does this automatically!
 
+## C++ API Reference (`SerialUI` class)
+
+| Method | Description |
+|--------|-------------|
+| `begin(baud)` | Initializes Serial and clears the screen. |
+| `clearScreen()` | Clears the terminal and resets cursor to (0,0). |
+| `setColor(UI_Color)` | Sets the current foreground/background color. |
+| `draw(const UI_Text&)` | Draws a static text object. |
+| `draw(const UI_Box&)` | Draws a box (outline). |
+| `draw(const UI_Line&)` | Draws a line between two points. |
+| `draw(const UI_Freehand&)`| Draws complex multi-line ASCII art. |
+| `drawText(x, y, str, col)`| Draws custom text at a specific position. |
+| `printfText(UI_Text, ...)`| Draws a text object using its content as a format string. |
+| `fillRect(x, y, w, h, c, col)`| Fills a rectangular area with character `c`. |
+| `drawProgressBar(box, %, col)`| Draws a progress bar inside the specified box. |
+| `millis()` | Returns milliseconds since start (works on Arduino & PC). |
+
+## Tips & Tricks
+
+- **Dynamic Colors**: Instead of using the static layout constant directly, copy it to a local variable to change its color before drawing:
+  ```cpp
+  UI_Box b = Layout_Main::status_indicator;
+  b.color = UI_Color::RED;
+  ui.draw(b);
+  ```
+- **Blinking Elements**: Use the `millis()` function to toggle drawing:
+  ```cpp
+  if ((millis() / 500) % 2) {
+      ui.draw(Layout_Main::alert_icon);
+  } else {
+      ui.fillRect(Layout_Main::alert_icon.x, Layout_Main::alert_icon.y, 1, 1, ' ', UI_Color::BLACK);
+  }
+  ```
+- **Formatting**: The `printfText` helper is perfect for sensors. Use `%0.2f` in your Text object content for 2 decimal places.
+
 ---
 *Developed as part of Version 21.*

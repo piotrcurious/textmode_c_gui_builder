@@ -2,6 +2,7 @@
 from __future__ import annotations
 import curses
 import re
+import os
 import threading
 import queue
 import json
@@ -26,6 +27,7 @@ SERIAL_UI_HEADER = r"""
   #include <avr/pgmspace.h>
 #else
   #include <stdio.h>
+  #include <chrono>
   #include <stdlib.h>
   #include <stdarg.h>
   #include <stdint.h>
@@ -45,7 +47,15 @@ SERIAL_UI_HEADER = r"""
       operator bool() { return true; }
   };
   static MockSerial Serial;
-  inline void delay(int ms) {}
+  inline void delay(int ms) {
+      auto start = std::chrono::steady_clock::now();
+      while (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() < ms);
+  }
+  inline uint32_t millis() {
+      static auto start = std::chrono::steady_clock::now();
+      auto now = std::chrono::steady_clock::now();
+      return std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+  }
 #endif
 
 enum class UI_Color {
@@ -133,6 +143,24 @@ public:
         vsnprintf(buffer, sizeof(buffer), text.content, args);
         va_end(args);
         drawText(text.x, text.y, buffer, text.color);
+    }
+
+    void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, char c, UI_Color color) {
+        setColor(color);
+        for (int i = 0; i < h; i++) {
+            moveCursor(x, y + i);
+            for (int j = 0; j < w; j++) Serial.write(c);
+        }
+        resetAttr();
+    }
+
+    void drawProgressBar(const UI_Box& b, float percent, UI_Color color) {
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        int innerWidth = b.w - 2;
+        int fillWidth = (int)((percent / 100.0) * innerWidth);
+        fillRect(b.x + 1, b.y + 1, fillWidth, b.h - 2, '#', color);
+        fillRect(b.x + 1 + fillWidth, b.y + 1, innerWidth - fillWidth, b.h - 2, ' ', color);
     }
 };
 #endif
@@ -374,8 +402,9 @@ class GuiManager:
             tk.Button(lf, text="Delete", command=lambda: self._emit("DELETE_FUNCTION")).pack(side="left", padx=2)
             tk.Button(lf, text="TEST/RUN", bg="#ccffcc", command=lambda: self._emit("TEST_FUNCTION")).pack(side="right", padx=2)
 
-            tk.Label(f_lab, text="Visual Output:").pack(padx=6, anchor="w")
-            self._visual_out = scrolledtext.ScrolledText(f_lab, font=("Courier", 10), bg="#1e1e1e", fg="#ffffff", height=15)
+            tk.Label(f_lab, text="Visual Output (80x24 Simulation):").pack(padx=6, anchor="w")
+            # Fixed width for 80 chars, height for 24 chars if possible
+            self._visual_out = scrolledtext.ScrolledText(f_lab, font=("Courier", 10), bg="#1e1e1e", fg="#ffffff", width=80, height=24)
             self._visual_out.pack(fill="both", expand=True, padx=6, pady=6)
             self._setup_ansi_tags(self._visual_out)
 
@@ -634,11 +663,30 @@ class GuiManager:
         txt.tag_configure("ansi_blink", overstrike=True)
         txt.tag_configure("ansi_code", elide=True, foreground="#777777")
 
+        # C++ highlighting tags
+        txt.tag_configure("cpp_kw", foreground="#569cd6", font=("Courier", 10, "bold"))
+        txt.tag_configure("cpp_type", foreground="#4ec9b0")
+        txt.tag_configure("cpp_layout", foreground="#ce9178", font=("Courier", 10, "italic"))
+        txt.tag_configure("cpp_comment", foreground="#6a9955")
+
     def _apply_ansi_highlight(self, txt):
         content = txt.get("1.0", "end-1c")
         for tag in txt.tag_names():
-            if tag.startswith("ansi"): txt.tag_remove(tag, "1.0", tk.END)
+            if tag.startswith("ansi") or tag.startswith("cpp_"):
+                txt.tag_remove(tag, "1.0", tk.END)
 
+        # Basic C++ Highlighting
+        kws = r'\b(if|else|for|while|return|const|static|void|int|float|bool|char|ui|Layout_[a-zA-Z0-9_]+|UI_Color::[a-zA-Z0-9_]+)\b'
+        for m in re.finditer(kws, content):
+            start, end = f"1.0 + {m.start()} chars", f"1.0 + {m.end()} chars"
+            if m.group().startswith("Layout_"): txt.tag_add("cpp_layout", start, end)
+            elif m.group().startswith("UI_Color"): txt.tag_add("cpp_type", start, end)
+            else: txt.tag_add("cpp_kw", start, end)
+
+        for m in re.finditer(r'//.*', content):
+            txt.tag_add("cpp_comment", f"1.0 + {m.start()} chars", f"1.0 + {m.end()} chars")
+
+        # ANSI Highlighting
         ms = list(re.finditer(r'\x1b\[([0-9;]*)m', content))
         cfg, cbg = "15", None
         cb, cd, ci, cu, cbl = False, False, False, False, False
@@ -764,7 +812,7 @@ class GuiManager:
         return frame
 
     # Blocking editors (Designer calls)
-    def edit_text_blocking(self, initial: str = "", title: str = "Edit Text") -> Optional[str]:
+    def edit_text_blocking(self, initial: str = "", title: str = "Edit Text", snippets: Optional[Dict[str, str]] = None) -> Optional[str]:
         """Open modal multiline text editor on Tk thread; return str or None."""
         if not self.ready.is_set() or not self._root: return initial
         result: Dict[str, Optional[str]] = {"value": None}
@@ -816,6 +864,13 @@ class GuiManager:
             btnf = tk.Frame(dlg); btnf.pack(fill="x", padx=6, pady=6)
             tk.Button(btnf, text="OK", command=ok).pack(side="left", padx=6)
             tk.Button(btnf, text="Cancel", command=cancel).pack(side="left", padx=6)
+
+            if snippets:
+                s_frame = tk.LabelFrame(dlg, text="Code Snippets")
+                s_frame.pack(fill="x", padx=6, pady=2)
+                for name, code in snippets.items():
+                    tk.Button(s_frame, text=name, font=("Arial", 8),
+                              command=lambda c=code: txt_v.insert(tk.INSERT, c)).pack(side="left", padx=2, pady=2)
 
             try:
                 dlg.grab_set(); dlg.focus_force()
@@ -1194,6 +1249,12 @@ class Designer:
             self.gui.display_test_output(res.stdout + "\n" + res.stderr)
             self.msg = "Test completed"
 
+            # Cleanup
+            try:
+                os.remove("test_runner.cpp")
+                os.remove("test_runner")
+            except: pass
+
         except Exception as e:
             self.msg = f"Test system error: {e}"
 
@@ -1284,7 +1345,13 @@ class Designer:
                 elif cmd == "EDIT_FUNCTION":
                     target = next((f for f in self.project.functions if f.name == data), None)
                     if target:
-                        new_body = self.gui.edit_text_blocking(target.body, title=f"Edit {target.name} Body")
+                        snippets = {
+                            "Blink": "if ((millis() / 500) % 2) {\n    ui.draw(...);\n} else {\n    ui.fillRect(..., ' ', UI_Color::BLACK);\n}",
+                            "Progress": "ui.drawProgressBar(Layout_...::..., val, UI_Color::GREEN);",
+                            "Printf": "ui.printfText(Layout_...::..., \"Value: %f\", val);",
+                            "Color Swap": "UI_Box b = Layout_...::...;\nb.color = UI_Color::RED;\nui.draw(b);"
+                        }
+                        new_body = self.gui.edit_text_blocking(target.body, title=f"Edit {target.name} Body", snippets=snippets)
                         if new_body is not None:
                             target.body = new_body
                             self.msg = f"Updated {target.name}"
@@ -1500,11 +1567,19 @@ class Designer:
         sig = ""
         body = ""
         if isinstance(o, Text):
-            sig = "float val"
-            body = f'ui.printfText(Layout_{self.cur_screen.name}::{o.name}, "%0.1f", val);'
+            if "temp" in o.name.lower():
+                sig = "float temp"
+                body = f'ui.printfText(Layout_{self.cur_screen.name}::{o.name}, "%0.1f C", temp);'
+            else:
+                sig = "const char* msg"
+                body = f'ui.drawText(Layout_{self.cur_screen.name}::{o.name}.x, Layout_{self.cur_screen.name}::{o.name}.y, msg, Layout_{self.cur_screen.name}::{o.name}.color);'
         elif isinstance(o, Box):
-            sig = "UI_Color col"
-            body = f"UI_Box b = Layout_{self.cur_screen.name}::{o.name};\n    b.color = col;\n    ui.draw(b);"
+            if "progress" in o.name.lower():
+                sig = "float percent"
+                body = f'ui.drawProgressBar(Layout_{self.cur_screen.name}::{o.name}, percent, UI_Color::GREEN);'
+            else:
+                sig = "UI_Color col"
+                body = f"UI_Box b = Layout_{self.cur_screen.name}::{o.name};\n    b.color = col;\n    ui.draw(b);"
         else:
             sig = "/* args */"
             body = f"// TODO: implement update for {o.name}\n    ui.draw(Layout_{self.cur_screen.name}::{o.name});"

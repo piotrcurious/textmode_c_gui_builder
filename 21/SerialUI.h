@@ -7,6 +7,7 @@
   #include <avr/pgmspace.h>
 #else
   #include <stdio.h>
+  #include <chrono>
   #include <stdlib.h>
   #include <stdarg.h>
   #include <stdint.h>
@@ -26,7 +27,15 @@
       operator bool() { return true; }
   };
   static MockSerial Serial;
-  inline void delay(int ms) {}
+  inline void delay(int ms) {
+      auto start = std::chrono::steady_clock::now();
+      while (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() < ms);
+  }
+  inline uint32_t millis() {
+      static auto start = std::chrono::steady_clock::now();
+      auto now = std::chrono::steady_clock::now();
+      return std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+  }
 #endif
 
 enum class UI_Color {
@@ -114,6 +123,24 @@ public:
         vsnprintf(buffer, sizeof(buffer), text.content, args);
         va_end(args);
         drawText(text.x, text.y, buffer, text.color);
+    }
+
+    void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, char c, UI_Color color) {
+        setColor(color);
+        for (int i = 0; i < h; i++) {
+            moveCursor(x, y + i);
+            for (int j = 0; j < w; j++) Serial.write(c);
+        }
+        resetAttr();
+    }
+
+    void drawProgressBar(const UI_Box& b, float percent, UI_Color color) {
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        int innerWidth = b.w - 2;
+        int fillWidth = (int)((percent / 100.0) * innerWidth);
+        fillRect(b.x + 1, b.y + 1, fillWidth, b.h - 2, '#', color);
+        fillRect(b.x + 1 + fillWidth, b.y + 1, innerWidth - fillWidth, b.h - 2, ' ', color);
     }
 };
 #endif
