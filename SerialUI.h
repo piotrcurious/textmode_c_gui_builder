@@ -9,7 +9,6 @@
   #include <stdio.h>
   #include <chrono>
   #include <stdlib.h>
-  #include <algorithm>
   #include <stdarg.h>
   #include <stdint.h>
   #include <string.h>

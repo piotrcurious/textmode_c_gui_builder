@@ -1,60 +1,77 @@
-[
-  {
-    "name": "Main",
-    "objects": [
-      {
-        "name": "box_0",
-        "color": "WHITE",
-        "type": "BOX",
-        "layer": 0,
-        "x": 3,
-        "y": 2,
-        "w": 18,
-        "h": 4
-      },
-      {
-        "name": "box_1",
-        "color": "RED",
-        "type": "BOX",
-        "layer": 1,
-        "x": 6,
-        "y": 4,
-        "w": 27,
-        "h": 4
-      },
-      {
-        "name": "temperature_float_C",
-        "color": "WHITE",
-        "type": "TEXT",
-        "layer": 2,
-        "x": 17,
-        "y": 6,
-        "content": "%f.3"
-      }
-    ]
-  },
-  {
-    "name": "settings",
-    "objects": [
-      {
-        "name": "red_box",
-        "color": "RED",
-        "type": "BOX",
-        "layer": 1,
-        "x": 4,
-        "y": 2,
-        "w": 35,
-        "h": 8
-      },
-      {
-        "name": "txt_1",
-        "color": "BLUE",
-        "type": "TEXT",
-        "layer": 1,
-        "x": 17,
-        "y": 5,
-        "content": "<--OH-->\n<--AH-->"
-      }
-    ]
-  }
-]
+{
+  "screens": [
+    {
+      "name": "Dashboard",
+      "objects": [
+        {
+          "name": "bg",
+          "color": "BLUE",
+          "type": "BOX",
+          "layer": 0,
+          "x": 0,
+          "y": 0,
+          "w": 80,
+          "h": 24
+        },
+        {
+          "name": "temp_gauge",
+          "color": "WHITE",
+          "type": "BOX",
+          "layer": 1,
+          "x": 2,
+          "y": 2,
+          "w": 20,
+          "h": 3
+        },
+        {
+          "name": "temp_label",
+          "color": "CYAN",
+          "type": "TEXT",
+          "layer": 2,
+          "x": 4,
+          "y": 1,
+          "content": "TEMPERATURE"
+        },
+        {
+          "name": "temp_val",
+          "color": "YELLOW",
+          "type": "TEXT",
+          "layer": 3,
+          "x": 23,
+          "y": 3,
+          "content": "%0.1f C"
+        },
+        {
+          "name": "status_box",
+          "color": "MAGENTA",
+          "type": "BOX",
+          "layer": 4,
+          "x": 40,
+          "y": 2,
+          "w": 30,
+          "h": 5
+        },
+        {
+          "name": "status_text",
+          "color": "WHITE",
+          "type": "TEXT",
+          "layer": 5,
+          "x": 42,
+          "y": 4,
+          "content": "SYSTEM: INITIALIZING"
+        }
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "update_dashboard",
+      "signature": "float temp, bool ok",
+      "body": "ui.drawProgressBar(Layout_Dashboard::temp_gauge, temp, temp > 80 ? UI_Color::RED : UI_Color::GREEN);\n    ui.printfText(Layout_Dashboard::temp_val, \"%0.1f C\", temp);\n    if (ok) {\n        ui.drawText(Layout_Dashboard::status_text.x, Layout_Dashboard::status_text.y, \"SYSTEM: OK          \", UI_Color::GREEN);\n    } else {\n        ui.drawText(Layout_Dashboard::status_text.x, Layout_Dashboard::status_text.y, \"SYSTEM: ERROR       \", UI_Color::B_RED);\n    }",
+      "test_cases": [
+        "update_dashboard(ui, 25.4, true)",
+        "update_dashboard(ui, 85.0, false)"
+      ]
+    }
+  ]
+}
